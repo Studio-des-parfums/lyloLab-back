@@ -1,0 +1,44 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model Material {
+  id              String  @id
+  casNumber       String? @map("cas_number")
+  name            String
+  family          String?
+  sensation       String? @db.Text
+  weight          Float?
+  subjectivePower Float?  @map("subjective_power")
+  descriptors     Json
+  source          String  @default("catalog")
+
+  formulaLines FormulaLine[]
+
+  @@map("materials")
+}
+
+model Formula {
+  id   String @id
+  name String
+
+  lines FormulaLine[]
+
+  @@map("formulas")
+}
+
+model FormulaLine {
+  id         Int    @id @default(autoincrement())
+  formulaId  String @map("formula_id")
+  materialId String @map("material_id")
+  quantity   Float
+
+  formula  Formula  @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+  material Material @relation(fields: [materialId], references: [id])
+
+  @@map("formula_lines")
+}
