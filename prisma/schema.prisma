@@ -7,15 +7,16 @@ datasource db {
 }
 
 model Material {
-  id              String  @id
+  id              String  @id @default(uuid())
   casNumber       String? @map("cas_number")
-  name            String
+  name            String  @unique
   family          String?
   sensation       String? @db.Text
   weight          Float?
   subjectivePower Float?  @map("subjective_power")
   descriptors     Json
   source          String  @default("catalog")
+  regulatory      Json?
 
   formulaLines FormulaLine[]
 
@@ -23,8 +24,12 @@ model Material {
 }
 
 model Formula {
-  id   String @id
-  name String
+  id          String   @id @default(uuid())
+  name        String
+  facets      Json?
+  adjustments Json?
+  source      String   @default("user")
+  createdAt   DateTime @default(now()) @map("created_at")
 
   lines FormulaLine[]
 

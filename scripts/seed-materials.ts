@@ -29,10 +29,11 @@ async function main() {
   console.log(`Seeding ${materials.length} materials...`);
 
   for (const material of materials) {
+    const { id: _extractionSlug, ...data } = material;
     await prisma.material.upsert({
-      where: { id: material.id },
-      create: material,
-      update: material,
+      where: { name: material.name },
+      create: data,
+      update: data,
     });
   }
 

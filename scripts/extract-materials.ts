@@ -99,7 +99,7 @@ async function main() {
       const index = columnIndex.get(col);
       return index === undefined ? null : row.getCell(index).value;
     };
-    const name = cleanText(get('Nom Base'));
+    let name = cleanText(get('Nom Base'));
     if (!name) return;
 
     const descriptors: Record<string, number> = {};
@@ -115,11 +115,18 @@ async function main() {
     // scores. Skip them until they get real scores — see extraction notes.
     if (!hasAnyScore) return;
 
-    let slug = slugify(name);
+    // slugify() normalizes case and accents, so a collision here also means
+    // two names that MySQL's accent/case-insensitive collation on the
+    // unique `name` column would treat as identical (e.g. "Hédione" vs
+    // "Hedione"), even though they are distinct materials with different
+    // profiles here. Disambiguate both the slug and the display name.
+    const baseSlug = slugify(name);
+    let slug = baseSlug;
     if (seenSlugs.has(slug)) {
       let suffix = 2;
-      while (seenSlugs.has(`${slug}-${suffix}`)) suffix++;
-      slug = `${slug}-${suffix}`;
+      while (seenSlugs.has(`${baseSlug}-${suffix}`)) suffix++;
+      slug = `${baseSlug}-${suffix}`;
+      name = `${name} (variante ${suffix})`;
     }
     seenSlugs.add(slug);
 

@@ -29,10 +29,6 @@ function normalize(name: string): string {
     .trim();
 }
 
-function slugify(name: string): string {
-  return normalize(name).replace(/\s+/g, '-');
-}
-
 async function main() {
   const raw = await readFile(ACCORDS_FILE, 'utf-8');
   const accords: Accord[] = JSON.parse(raw);
@@ -46,42 +42,49 @@ async function main() {
   const byNormalizedName = new Map(
     existingMaterials.map((m) => [normalize(m.name), m.id]),
   );
+  const usedNames = new Set(existingMaterials.map((m) => m.name));
 
   let newMaterialsCount = 0;
   let linkedToExistingCount = 0;
 
   for (const accord of accords) {
-    await prisma.formula.upsert({
-      where: { id: accord.id },
-      create: { id: accord.id, name: accord.name },
-      update: { name: accord.name },
+    const existingFormula = await prisma.formula.findFirst({
+      where: { name: accord.name, source: 'accord' },
     });
 
+    const formula = existingFormula
+      ? await prisma.formula.update({
+          where: { id: existingFormula.id },
+          data: { name: accord.name },
+        })
+      : await prisma.formula.create({
+          data: { name: accord.name, source: 'accord' },
+        });
+
     // clear previous lines so re-running the seed doesn't duplicate them
-    await prisma.formulaLine.deleteMany({ where: { formulaId: accord.id } });
+    await prisma.formulaLine.deleteMany({ where: { formulaId: formula.id } });
 
     for (const line of accord.lines) {
       const normalized = normalize(line.name);
       let materialId = byNormalizedName.get(normalized);
 
       if (!materialId) {
-        materialId = slugify(line.name);
-        // guard against id collisions with materials created earlier in this run
-        let suffix = 2;
-        let candidateId = materialId;
-        while (byNormalizedName.has(candidateId)) {
-          candidateId = `${materialId}-${suffix}`;
-          suffix++;
+        let name = line.name;
+        if (usedNames.has(name)) {
+          let suffix = 2;
+          while (usedNames.has(`${name} (variante ${suffix})`)) suffix++;
+          name = `${name} (variante ${suffix})`;
         }
+        usedNames.add(name);
 
-        await prisma.material.create({
+        const created = await prisma.material.create({
           data: {
-            id: materialId,
-            name: line.name,
+            name,
             descriptors: line.descriptors,
             source: 'accord',
           },
         });
+        materialId = created.id;
         byNormalizedName.set(normalized, materialId);
         newMaterialsCount++;
       } else {
@@ -90,7 +93,7 @@ async function main() {
 
       await prisma.formulaLine.create({
         data: {
-          formulaId: accord.id,
+          formulaId: formula.id,
           materialId,
           quantity: line.quantity,
         },
