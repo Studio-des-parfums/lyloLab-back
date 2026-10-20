@@ -1,8 +1,10 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsIn,
   IsNumber,
   IsObject,
+  IsOptional,
   IsString,
   Min,
   MinLength,
@@ -33,4 +35,8 @@ export class CreateFormulaDto {
   @ValidateNested({ each: true })
   @Type(() => CreateFormulaLineDto)
   lines!: CreateFormulaLineDto[];
+
+  @IsOptional()
+  @IsIn(['draft', 'completed'])
+  status?: 'draft' | 'completed';
 }

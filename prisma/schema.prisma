@@ -29,6 +29,7 @@ model Formula {
   facets      Json?
   adjustments Json?
   source      String   @default("user")
+  status      String   @default("draft")
   createdAt   DateTime @default(now()) @map("created_at")
 
   lines FormulaLine[]
