@@ -64,7 +64,7 @@ const distinct = (values: (string | null)[]) => [
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getOverview() {
+  async getOverview(teamId: string) {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -72,6 +72,7 @@ export class DashboardService {
 
     const [formulas, projects, clientCount, materials] = await Promise.all([
       this.prisma.formula.findMany({
+        where: { teamId },
         orderBy: { createdAt: 'desc' },
         include: {
           project: { include: { client: true } },
@@ -83,10 +84,12 @@ export class DashboardService {
         },
       }),
       this.prisma.project.findMany({
+        where: { teamId },
         include: { client: true, formulas: { select: { status: true } } },
       }),
-      this.prisma.client.count(),
+      this.prisma.client.count({ where: { teamId } }),
       this.prisma.material.findMany({
+        where: { teamId },
         select: {
           id: true,
           name: true,

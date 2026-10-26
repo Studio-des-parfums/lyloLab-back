@@ -16,6 +16,7 @@ interface MaterialRegulatory {
   isAllergen?: boolean;
   allergens?: string[];
   recombi?: string;
+  recombiRisk?: boolean;
   physicoChemicalIssue?: string;
   triggeringConditions?: string;
   impactResult?: string;
@@ -29,24 +30,31 @@ interface MaterialRegulatory {
 
 const REGULATORY_NOTE_FIELDS: (keyof MaterialRegulatory)[] = [
   'rciiiRestriction',
+  'rciiiNote',
+  'ghsClassification',
   'recombi',
   'physicoChemicalIssue',
   'triggeringConditions',
   'impactResult',
   'usaMocra',
+  'usaMocraNote',
   'californiaProp65',
+  'californiaNote',
   'chinaCsar',
+  'chinaNote',
   'chinaMeaning',
   'menaGso',
+  'menaNote',
 ];
 
 @Injectable()
 export class FormulasService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(status?: 'draft' | 'completed', projectId?: string) {
+  findAll(teamId: string, status?: 'draft' | 'completed', projectId?: string) {
     return this.prisma.formula.findMany({
       where: {
+        teamId,
         ...(status ? { status } : {}),
         ...(projectId ? { projectId } : {}),
       },
@@ -58,9 +66,9 @@ export class FormulasService {
     });
   }
 
-  async findOne(id: string) {
-    const formula = await this.prisma.formula.findUnique({
-      where: { id },
+  async findOne(teamId: string, id: string) {
+    const formula = await this.prisma.formula.findFirst({
+      where: { id, teamId },
       include: {
         lines: { include: { material: true } },
         project: { include: { client: true } },
@@ -72,9 +80,29 @@ export class FormulasService {
     return formula;
   }
 
-  create(dto: CreateFormulaDto) {
+  /** Materials and project referenced by a formula must belong to the same team. */
+  private async assertReferences(teamId: string, dto: CreateFormulaDto) {
+    const materialIds = [...new Set(dto.lines.map((line) => line.materialId))];
+    const owned = await this.prisma.material.count({
+      where: { id: { in: materialIds }, teamId },
+    });
+    if (owned !== materialIds.length) {
+      throw new BadRequestException("La formule contient une matière première qui n'existe pas dans votre équipe.");
+    }
+    if (dto.projectId) {
+      const project = await this.prisma.project.findFirst({
+        where: { id: dto.projectId, teamId },
+        select: { id: true },
+      });
+      if (!project) throw new NotFoundException(`Project "${dto.projectId}" not found`);
+    }
+  }
+
+  async create(teamId: string, dto: CreateFormulaDto) {
+    await this.assertReferences(teamId, dto);
     return this.prisma.formula.create({
       data: {
+        teamId,
         name: dto.name,
         facets: dto.facets,
         adjustments: dto.adjustments,
@@ -93,13 +121,14 @@ export class FormulasService {
     });
   }
 
-  async update(id: string, dto: CreateFormulaDto) {
-    const existing = await this.findOne(id);
+  async update(teamId: string, id: string, dto: CreateFormulaDto) {
+    const existing = await this.findOne(teamId, id);
     if (existing.status === 'completed') {
       throw new ConflictException(
         'Cette formule est finalisée et ne peut plus être modifiée : dupliquez-la pour créer une nouvelle version.',
       );
     }
+    await this.assertReferences(teamId, dto);
     return this.prisma.formula.update({
       where: { id },
       data: {
@@ -121,21 +150,21 @@ export class FormulasService {
     });
   }
 
-  async updateStatus(id: string, dto: UpdateFormulaStatusDto) {
-    await this.findOne(id);
+  async updateStatus(teamId: string, id: string, dto: UpdateFormulaStatusDto) {
+    await this.findOne(teamId, id);
     return this.prisma.formula.update({
       where: { id },
       data: { status: dto.status },
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id);
+  async remove(teamId: string, id: string) {
+    await this.findOne(teamId, id);
     await this.prisma.formula.delete({ where: { id } });
   }
 
-  async convertToMaterial(id: string) {
-    const formula = await this.findOne(id);
+  async convertToMaterial(teamId: string, id: string) {
+    const formula = await this.findOne(teamId, id);
 
     if (formula.lines.length === 0) {
       throw new BadRequestException(
@@ -164,6 +193,7 @@ export class FormulasService {
     try {
       return await this.prisma.material.create({
         data: {
+          teamId,
           name: formula.name,
           descriptors,
           source: 'user',
@@ -195,6 +225,7 @@ export class FormulasService {
     lines: { quantity: number; material: { name: string; regulatory: unknown } }[],
   ): MaterialRegulatory | null {
     let isAllergen = false;
+    let recombiRisk = false;
     const allergens = new Set<string>();
     let mostRestrictiveLimit: number | null = null;
     const notes: Partial<Record<keyof MaterialRegulatory, string[]>> = {};
@@ -204,6 +235,7 @@ export class FormulasService {
       if (!reg) continue;
 
       if (reg.isAllergen) isAllergen = true;
+      if (reg.recombiRisk) recombiRisk = true;
       for (const allergen of reg.allergens ?? []) allergens.add(allergen);
 
       const ingredientLimit = parseIfraLimitPercent(reg.ifraLimit);
@@ -234,6 +266,7 @@ export class FormulasService {
     } else if (isAllergen) {
       regulatory.isAllergen = true;
     }
+    if (recombiRisk) regulatory.recombiRisk = true;
     if (mostRestrictiveLimit !== null) {
       regulatory.ifraLimit = `${mostRestrictiveLimit.toFixed(2)} %`;
     }

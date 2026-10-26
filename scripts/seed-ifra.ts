@@ -8,15 +8,26 @@ import 'dotenv/config';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IFRA_FILE = join(__dirname, '..', 'data', 'ifra-regulatory.json');
 
+// Seeded data belongs to one team: its id is given by SEED_TEAM_ID.
+function seedTeamId(): string {
+  const teamId = process.env.SEED_TEAM_ID;
+  if (!teamId) {
+    console.error("Définissez SEED_TEAM_ID (id de l'équipe qui reçoit les données).");
+    process.exit(1);
+  }
+  return teamId;
+}
+
 async function main() {
   const raw = await readFile(IFRA_FILE, 'utf-8');
   const byCas: Record<string, Record<string, unknown>> = JSON.parse(raw);
 
   const adapter = new PrismaMariaDb(process.env.DATABASE_URL!);
   const prisma = new PrismaClient({ adapter });
+  const teamId = seedTeamId();
 
   const materials = await prisma.material.findMany({
-    where: { casNumber: { not: null } },
+    where: { casNumber: { not: null }, teamId },
     select: { id: true, casNumber: true, name: true },
   });
 

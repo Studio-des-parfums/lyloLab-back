@@ -29,14 +29,26 @@ function normalize(name: string): string {
     .trim();
 }
 
+// Seeded data belongs to one team: its id is given by SEED_TEAM_ID.
+function seedTeamId(): string {
+  const teamId = process.env.SEED_TEAM_ID;
+  if (!teamId) {
+    console.error("Définissez SEED_TEAM_ID (id de l'équipe qui reçoit les données).");
+    process.exit(1);
+  }
+  return teamId;
+}
+
 async function main() {
   const raw = await readFile(ACCORDS_FILE, 'utf-8');
   const accords: Accord[] = JSON.parse(raw);
 
   const adapter = new PrismaMariaDb(process.env.DATABASE_URL!);
   const prisma = new PrismaClient({ adapter });
+  const teamId = seedTeamId();
 
   const existingMaterials = await prisma.material.findMany({
+    where: { teamId },
     select: { id: true, name: true },
   });
   const byNormalizedName = new Map(
@@ -49,7 +61,7 @@ async function main() {
 
   for (const accord of accords) {
     const existingFormula = await prisma.formula.findFirst({
-      where: { name: accord.name, source: 'accord' },
+      where: { name: accord.name, source: 'accord', teamId },
     });
 
     const formula = existingFormula
@@ -58,7 +70,7 @@ async function main() {
           data: { name: accord.name },
         })
       : await prisma.formula.create({
-          data: { name: accord.name, source: 'accord' },
+          data: { name: accord.name, source: 'accord', teamId },
         });
 
     // clear previous lines so re-running the seed doesn't duplicate them
@@ -82,6 +94,7 @@ async function main() {
             name,
             descriptors: line.descriptors,
             source: 'accord',
+            teamId,
           },
         });
         materialId = created.id;

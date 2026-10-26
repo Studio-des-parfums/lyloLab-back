@@ -35,14 +35,26 @@ interface ExistingMaterial {
   source: string;
 }
 
+// Seeded data belongs to one team: its id is given by SEED_TEAM_ID.
+function seedTeamId(): string {
+  const teamId = process.env.SEED_TEAM_ID;
+  if (!teamId) {
+    console.error("Définissez SEED_TEAM_ID (id de l'équipe qui reçoit les données).");
+    process.exit(1);
+  }
+  return teamId;
+}
+
 async function main() {
   const raw = await readFile(INVENTORY_FILE, 'utf-8');
   const entries: InventoryEntry[] = JSON.parse(raw);
 
   const adapter = new PrismaMariaDb(process.env.DATABASE_URL!);
   const prisma = new PrismaClient({ adapter });
+  const teamId = seedTeamId();
 
   const existing: ExistingMaterial[] = await prisma.material.findMany({
+    where: { teamId },
     select: { id: true, name: true, casNumber: true, source: true },
   });
   // Catalog materials take priority over the ones a previous run of this
@@ -164,6 +176,7 @@ async function main() {
         casNumber: firstValue(group, 'casNumber'),
         descriptors: {},
         source: 'inventory',
+        teamId,
         ...inventoryFields(group),
       },
     });
@@ -185,18 +198,21 @@ async function main() {
   }));
 
   await prisma.$transaction([
-    prisma.materialStock.deleteMany({ where: { source: STOCK_SOURCE } }),
+    prisma.materialStock.deleteMany({ where: { source: STOCK_SOURCE, material: { teamId } } }),
     prisma.materialStock.createMany({ data: stockRows }),
   ]);
 
   // Materials created by an earlier run that no longer receive any row
   // (e.g. now merged into a catalog material). Kept if used in a formula.
   const orphans = await prisma.material.deleteMany({
-    where: { source: 'inventory', stocks: { none: {} }, formulaLines: { none: {} } },
+    where: { teamId, source: 'inventory', stocks: { none: {} }, formulaLines: { none: {} } },
   });
   console.log(`Removed ${orphans.count} orphan inventory materials.`);
 
-  const [materials, stocks] = await Promise.all([prisma.material.count(), prisma.materialStock.count()]);
+  const [materials, stocks] = await Promise.all([
+    prisma.material.count({ where: { teamId } }),
+    prisma.materialStock.count({ where: { material: { teamId } } }),
+  ]);
   console.log(`Done. ${materials} materials and ${stocks} stock rows now in database.`);
 
   await prisma.$disconnect();

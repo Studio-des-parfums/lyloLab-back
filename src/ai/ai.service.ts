@@ -167,10 +167,11 @@ export class AiService {
     return this.client;
   }
 
-  async chat(dto: ChatDto): Promise<ChatResponse> {
+  async chat(teamId: string, dto: ChatDto): Promise<ChatResponse> {
     const client = this.getClient();
 
     const catalog = await this.prisma.material.findMany({
+      where: { teamId },
       select: {
         id: true,
         name: true,

@@ -7,16 +7,17 @@ import type { UpdateClientDto } from './dto/update-client.dto.js';
 export class ClientsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll() {
+  findAll(teamId: string) {
     return this.prisma.client.findMany({
+      where: { teamId },
       orderBy: { createdAt: 'desc' },
       include: { projects: { orderBy: { name: 'asc' } } },
     });
   }
 
-  async findOne(id: string) {
-    const client = await this.prisma.client.findUnique({
-      where: { id },
+  async findOne(teamId: string, id: string) {
+    const client = await this.prisma.client.findFirst({
+      where: { id, teamId },
       include: { projects: { orderBy: { name: 'asc' } } },
     });
     if (!client) {
@@ -25,9 +26,10 @@ export class ClientsService {
     return client;
   }
 
-  create(dto: CreateClientDto) {
+  create(teamId: string, dto: CreateClientDto) {
     return this.prisma.client.create({
       data: {
+        teamId,
         company: dto.company,
         contactFirstName: dto.contactFirstName,
         contactLastName: dto.contactLastName,
@@ -37,8 +39,8 @@ export class ClientsService {
     });
   }
 
-  async update(id: string, dto: UpdateClientDto) {
-    await this.findOne(id);
+  async update(teamId: string, id: string, dto: UpdateClientDto) {
+    await this.findOne(teamId, id);
     return this.prisma.client.update({ where: { id }, data: dto });
   }
 }

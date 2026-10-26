@@ -2,8 +2,10 @@ import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module.js';
+import { assertAuthConfigured } from './auth/token.js';
 
 async function bootstrap() {
+  assertAuthConfigured();
   const app = await NestFactory.create(AppModule);
   app.enableCors();
   app.setGlobalPrefix('api');

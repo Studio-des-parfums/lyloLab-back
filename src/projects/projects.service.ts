@@ -8,17 +8,17 @@ import type { UpdateProjectDto } from './dto/update-project.dto.js';
 export class ProjectsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(clientId?: string) {
+  findAll(teamId: string, clientId?: string) {
     return this.prisma.project.findMany({
-      where: clientId ? { clientId } : undefined,
+      where: { teamId, ...(clientId ? { clientId } : {}) },
       orderBy: { name: 'asc' },
       include: { client: true },
     });
   }
 
-  async findOne(id: string) {
-    const project = await this.prisma.project.findUnique({
-      where: { id },
+  async findOne(teamId: string, id: string) {
+    const project = await this.prisma.project.findFirst({
+      where: { id, teamId },
       include: {
         client: true,
         formulas: {
@@ -33,10 +33,18 @@ export class ProjectsService {
     return project;
   }
 
-  async create(dto: CreateProjectDto) {
+  async create(teamId: string, dto: CreateProjectDto) {
+    const client = await this.prisma.client.findFirst({
+      where: { id: dto.clientId, teamId },
+      select: { id: true },
+    });
+    if (!client) {
+      throw new NotFoundException(`Client "${dto.clientId}" not found`);
+    }
     try {
       return await this.prisma.project.create({
         data: {
+          teamId,
           name: dto.name,
           clientId: dto.clientId,
           description: dto.description,
@@ -58,8 +66,8 @@ export class ProjectsService {
     }
   }
 
-  async update(id: string, dto: UpdateProjectDto) {
-    await this.findOne(id);
+  async update(teamId: string, id: string, dto: UpdateProjectDto) {
+    await this.findOne(teamId, id);
     try {
       return await this.prisma.project.update({
         where: { id },

@@ -34,19 +34,17 @@ function cleanDescriptors(
 export class MaterialsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(search?: string) {
+  findAll(teamId: string, search?: string) {
     return this.prisma.material.findMany({
-      where: search
-        ? { name: { contains: search } }
-        : undefined,
+      where: { teamId, ...(search ? { name: { contains: search } } : {}) },
       include: { stocks: { orderBy: { id: 'asc' } } },
       orderBy: { name: 'asc' },
     });
   }
 
-  async findOne(id: string) {
-    const material = await this.prisma.material.findUnique({
-      where: { id },
+  async findOne(teamId: string, id: string) {
+    const material = await this.prisma.material.findFirst({
+      where: { id, teamId },
       include: {
         stocks: { orderBy: { id: 'asc' } },
         sourceFormula: {
@@ -60,8 +58,8 @@ export class MaterialsService {
     return material;
   }
 
-  async update(id: string, dto: UpdateMaterialDto) {
-    await this.ensureMaterial(id);
+  async update(teamId: string, id: string, dto: UpdateMaterialDto) {
+    await this.ensureMaterial(teamId, id);
 
     try {
       return await this.prisma.material.update({
@@ -144,8 +142,8 @@ export class MaterialsService {
     }
   }
 
-  async createStock(materialId: string, dto: CreateMaterialStockDto) {
-    await this.ensureMaterial(materialId);
+  async createStock(teamId: string, materialId: string, dto: CreateMaterialStockDto) {
+    await this.ensureMaterial(teamId, materialId);
 
     await this.prisma.materialStock.create({
       data: {
@@ -164,11 +162,12 @@ export class MaterialsService {
   }
 
   async updateStock(
+    teamId: string,
     materialId: string,
     stockId: number,
     dto: UpdateMaterialStockDto,
   ) {
-    await this.ensureStock(materialId, stockId);
+    await this.ensureStock(teamId, materialId, stockId);
 
     await this.prisma.materialStock.update({
       where: { id: stockId },
@@ -193,15 +192,15 @@ export class MaterialsService {
     return this.findMaterialWithStocks(materialId);
   }
 
-  async deleteStock(materialId: string, stockId: number) {
-    await this.ensureStock(materialId, stockId);
+  async deleteStock(teamId: string, materialId: string, stockId: number) {
+    await this.ensureStock(teamId, materialId, stockId);
     await this.prisma.materialStock.delete({ where: { id: stockId } });
     return this.findMaterialWithStocks(materialId);
   }
 
-  private async ensureMaterial(id: string) {
-    const material = await this.prisma.material.findUnique({
-      where: { id },
+  private async ensureMaterial(teamId: string, id: string) {
+    const material = await this.prisma.material.findFirst({
+      where: { id, teamId },
       select: { id: true },
     });
     if (!material) {
@@ -210,7 +209,8 @@ export class MaterialsService {
     return material;
   }
 
-  private async ensureStock(materialId: string, stockId: number) {
+  private async ensureStock(teamId: string, materialId: string, stockId: number) {
+    await this.ensureMaterial(teamId, materialId);
     const stock = await this.prisma.materialStock.findUnique({
       where: { id: stockId },
       select: { id: true, materialId: true },
