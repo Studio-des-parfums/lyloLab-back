@@ -37,6 +37,15 @@ export class CreateFormulaDto {
   lines!: CreateFormulaLineDto[];
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  totalVolumeMl?: number | null;
+
+  @IsOptional()
   @IsIn(['draft', 'completed'])
   status?: 'draft' | 'completed';
+
+  @IsOptional()
+  @IsString()
+  projectId?: string | null;
 }

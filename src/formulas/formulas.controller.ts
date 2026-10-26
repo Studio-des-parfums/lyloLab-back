@@ -18,8 +18,11 @@ export class FormulasController {
   constructor(private readonly formulasService: FormulasService) {}
 
   @Get()
-  findAll(@Query('status') status?: 'draft' | 'completed') {
-    return this.formulasService.findAll(status);
+  findAll(
+    @Query('status') status?: 'draft' | 'completed',
+    @Query('projectId') projectId?: string,
+  ) {
+    return this.formulasService.findAll(status, projectId);
   }
 
   @Get(':id')
@@ -48,5 +51,10 @@ export class FormulasController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.formulasService.remove(id);
+  }
+
+  @Post(':id/convert-to-material')
+  convertToMaterial(@Param('id') id: string) {
+    return this.formulasService.convertToMaterial(id);
   }
 }

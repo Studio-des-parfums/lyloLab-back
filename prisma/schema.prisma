@@ -16,25 +16,91 @@ model Material {
   subjectivePower Float?  @map("subjective_power")
   descriptors     Json
   source          String  @default("catalog")
+  origin          String  @default("natural")
   regulatory      Json?
 
+  // Lab inventory data (Rangement frigo MP). `nature` is the chemical nature
+  // of the raw material, distinct from `origin` (catalog vs formula-derived).
+  nature             String?
+  ifraCat4           String? @map("ifra_cat4") @db.Text
+  cosmeticRegulation String? @map("cosmetic_regulation") @db.Text
+  allergens          String? @db.Text
+  flavor             String? @db.Text
+  flavorRestriction  String? @map("flavor_restriction") @db.Text
+
+  sourceFormulaId String?  @unique @map("source_formula_id")
+  sourceFormula   Formula? @relation("FormulaAsMaterial", fields: [sourceFormulaId], references: [id], onDelete: SetNull)
+
   formulaLines FormulaLine[]
+  stocks       MaterialStock[]
 
   @@map("materials")
 }
 
-model Formula {
-  id          String   @id @default(uuid())
-  name        String
-  facets      Json?
-  adjustments Json?
-  source      String   @default("user")
-  status      String   @default("draft")
-  createdAt   DateTime @default(now()) @map("created_at")
+model MaterialStock {
+  id         Int     @id @default(autoincrement())
+  materialId String  @map("material_id")
+  label      String
+  supplier   String?
+  producer   String?
+  location   String?
+  stockGrams Float?  @map("stock_grams")
+  stockNote  String? @map("stock_note")
+  source     String  @default("rangement")
 
-  lines FormulaLine[]
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([materialId])
+  @@map("material_stocks")
+}
+
+model Formula {
+  id            String   @id @default(uuid())
+  name          String
+  facets        Json?
+  adjustments   Json?
+  totalVolumeMl Float?   @map("total_volume_ml")
+  source        String   @default("user")
+  status        String   @default("draft")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  projectId String?  @map("project_id")
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  lines           FormulaLine[]
+  materializedAs  Material?     @relation("FormulaAsMaterial")
 
   @@map("formulas")
+}
+
+model Client {
+  id                String   @id @default(uuid())
+  company           String?
+  contactFirstName  String?  @map("contact_first_name")
+  contactLastName   String?  @map("contact_last_name")
+  contactEmail      String?  @map("contact_email")
+  contactPhone      String?  @map("contact_phone")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  projects Project[]
+
+  @@map("clients")
+}
+
+model Project {
+  id          String    @id @default(uuid())
+  name        String
+  clientId    String    @map("client_id")
+  description String?   @db.Text
+  startDate   DateTime? @map("start_date")
+  endDate     DateTime? @map("end_date")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  client   Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  formulas Formula[]
+
+  @@unique([clientId, name])
+  @@map("projects")
 }
 
 model FormulaLine {
