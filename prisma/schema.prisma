@@ -28,6 +28,15 @@ model Material {
   flavor             String? @db.Text
   flavorRestriction  String? @map("flavor_restriction") @db.Text
 
+  // Technical sheet, filled in by hand from the material page.
+  adjacentNote         String?  @map("adjacent_note") @db.Text
+  regulation           String?  @db.Text
+  freeNote             String?  @map("free_note") @db.Text
+  visualAspect         String?  @map("visual_aspect")
+  flashPoint           String?  @map("flash_point")
+  physicochemicalState String?  @map("physicochemical_state")
+  waterBase            Boolean? @map("water_base")
+
   sourceFormulaId String?  @unique @map("source_formula_id")
   sourceFormula   Formula? @relation("FormulaAsMaterial", fields: [sourceFormulaId], references: [id], onDelete: SetNull)
 

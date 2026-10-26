@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsIn,
   IsNumber,
   IsObject,
@@ -64,6 +65,34 @@ export class UpdateMaterialDto {
   @IsOptional()
   @IsString()
   flavorRestriction?: string | null;
+
+  @IsOptional()
+  @IsString()
+  adjacentNote?: string | null;
+
+  @IsOptional()
+  @IsString()
+  regulation?: string | null;
+
+  @IsOptional()
+  @IsString()
+  freeNote?: string | null;
+
+  @IsOptional()
+  @IsString()
+  visualAspect?: string | null;
+
+  @IsOptional()
+  @IsString()
+  flashPoint?: string | null;
+
+  @IsOptional()
+  @IsString()
+  physicochemicalState?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  waterBase?: boolean | null;
 
   @IsOptional()
   @IsObject()

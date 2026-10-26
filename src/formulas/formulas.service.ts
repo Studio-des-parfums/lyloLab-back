@@ -11,7 +11,7 @@ import type { UpdateFormulaStatusDto } from './dto/update-formula-status.dto.js'
 import { parseIfraLimitPercent } from './ifra-limit.js';
 
 interface MaterialRegulatory {
-  ifraLimit?: string;
+  ifraLimit?: string | number;
   rciiiRestriction?: string;
   isAllergen?: boolean;
   allergens?: string[];
@@ -94,7 +94,12 @@ export class FormulasService {
   }
 
   async update(id: string, dto: CreateFormulaDto) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
+    if (existing.status === 'completed') {
+      throw new ConflictException(
+        'Cette formule est finalisée et ne peut plus être modifiée : dupliquez-la pour créer une nouvelle version.',
+      );
+    }
     return this.prisma.formula.update({
       where: { id },
       data: {

@@ -101,6 +101,25 @@ export class MaterialsService {
           ...(dto.flavorRestriction !== undefined
             ? { flavorRestriction: cleanText(dto.flavorRestriction) ?? null }
             : {}),
+          ...(dto.adjacentNote !== undefined
+            ? { adjacentNote: cleanText(dto.adjacentNote) ?? null }
+            : {}),
+          ...(dto.regulation !== undefined
+            ? { regulation: cleanText(dto.regulation) ?? null }
+            : {}),
+          ...(dto.freeNote !== undefined
+            ? { freeNote: cleanText(dto.freeNote) ?? null }
+            : {}),
+          ...(dto.visualAspect !== undefined
+            ? { visualAspect: cleanText(dto.visualAspect) ?? null }
+            : {}),
+          ...(dto.flashPoint !== undefined
+            ? { flashPoint: cleanText(dto.flashPoint) ?? null }
+            : {}),
+          ...(dto.physicochemicalState !== undefined
+            ? { physicochemicalState: cleanText(dto.physicochemicalState) ?? null }
+            : {}),
+          ...(dto.waterBase !== undefined ? { waterBase: dto.waterBase } : {}),
           ...(dto.regulatory !== undefined
             ? {
                 regulatory:

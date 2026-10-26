@@ -32,6 +32,7 @@
     "dotenv": "^18.0.8",
     "exceljs": "^4.4.0",
     "mariadb": "^3.5.4",
+    "openai": "^7.43.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
