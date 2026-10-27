@@ -34,7 +34,7 @@ export class FormulasController {
 
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateFormulaDto) {
-    return this.formulasService.create(user.teamId, dto);
+    return this.formulasService.create(user, dto);
   }
 
   @Put(':id')

@@ -76,6 +76,7 @@ export class DashboardService {
         orderBy: { createdAt: 'desc' },
         include: {
           project: { include: { client: true } },
+          createdBy: { select: { name: true } },
           lines: {
             include: {
               material: { select: { id: true, name: true, regulatory: true } },
@@ -147,6 +148,7 @@ export class DashboardService {
         name: f.name,
         createdAt: f.createdAt.toISOString(),
         materialCount: f.lines.length,
+        author: f.createdBy?.name ?? f.createdByName,
         projectId: f.project?.id ?? null,
         projectName: f.project?.name ?? null,
         clientName: f.project ? clientDisplayName(f.project.client) : null,

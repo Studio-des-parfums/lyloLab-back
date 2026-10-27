@@ -23,7 +23,10 @@ export class ProjectsService {
         client: true,
         formulas: {
           orderBy: { createdAt: 'desc' },
-          include: { materializedAs: { select: { id: true } } },
+          include: {
+            materializedAs: { select: { id: true } },
+            createdBy: { select: { id: true, name: true } },
+          },
         },
       },
     });

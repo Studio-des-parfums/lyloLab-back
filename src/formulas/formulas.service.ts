@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { CreateFormulaDto } from './dto/create-formula.dto.js';
 import type { UpdateFormulaStatusDto } from './dto/update-formula-status.dto.js';
+import type { AuthUser } from '../auth/auth-user.js';
 import { parseIfraLimitPercent } from './ifra-limit.js';
 
 interface MaterialRegulatory {
@@ -47,6 +48,8 @@ const REGULATORY_NOTE_FIELDS: (keyof MaterialRegulatory)[] = [
   'menaNote',
 ];
 
+const AUTHOR_SELECT = { createdBy: { select: { id: true, name: true } } } as const;
+
 @Injectable()
 export class FormulasService {
   constructor(private readonly prisma: PrismaService) {}
@@ -62,6 +65,7 @@ export class FormulasService {
       include: {
         materializedAs: { select: { id: true } },
         project: { include: { client: true } },
+        ...AUTHOR_SELECT,
       },
     });
   }
@@ -72,6 +76,7 @@ export class FormulasService {
       include: {
         lines: { include: { material: true } },
         project: { include: { client: true } },
+        ...AUTHOR_SELECT,
       },
     });
     if (!formula) {
@@ -98,11 +103,14 @@ export class FormulasService {
     }
   }
 
-  async create(teamId: string, dto: CreateFormulaDto) {
+  async create(user: AuthUser, dto: CreateFormulaDto) {
+    const teamId = user.teamId;
     await this.assertReferences(teamId, dto);
     return this.prisma.formula.create({
       data: {
         teamId,
+        createdById: user.id,
+        createdByName: user.name,
         name: dto.name,
         facets: dto.facets,
         adjustments: dto.adjustments,
@@ -117,7 +125,11 @@ export class FormulasService {
           })),
         },
       },
-      include: { lines: { include: { material: true } }, project: { include: { client: true } } },
+      include: {
+        lines: { include: { material: true } },
+        project: { include: { client: true } },
+        ...AUTHOR_SELECT,
+      },
     });
   }
 
@@ -146,7 +158,11 @@ export class FormulasService {
           })),
         },
       },
-      include: { lines: { include: { material: true } }, project: { include: { client: true } } },
+      include: {
+        lines: { include: { material: true } },
+        project: { include: { client: true } },
+        ...AUTHOR_SELECT,
+      },
     });
   }
 

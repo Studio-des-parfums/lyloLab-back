@@ -32,7 +32,8 @@ model User {
   teamId       String   @map("team_id")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team     Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  formulas Formula[]
 
   @@index([teamId])
   @@map("users")
@@ -114,6 +115,11 @@ model Formula {
 
   lines           FormulaLine[]
   materializedAs  Material?     @relation("FormulaAsMaterial")
+
+  createdById   String? @map("created_by_id")
+  createdBy     User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  // Kept so the author still shows once their account is removed from the team.
+  createdByName String? @map("created_by_name")
 
   teamId String @map("team_id")
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
