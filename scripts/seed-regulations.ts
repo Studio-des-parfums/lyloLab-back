@@ -8,7 +8,7 @@
  *   npx tsx scripts/seed-regulations.ts
  */
 import { PrismaClient } from '@prisma/client';
-import { PrismaMariaDb } from '@prisma/adapter-mariadb';
+import { seedAdapter } from './seed-db.js';
 import 'dotenv/config';
 import { syncOfficialRegulations } from '../src/regulations/regulation-sync.js';
 
@@ -1347,7 +1347,7 @@ const PEROXIDE_SPECS: {
 
 async function main() {
   const prisma = new PrismaClient({
-    adapter: new PrismaMariaDb(process.env.DATABASE_URL!),
+    adapter: seedAdapter(),
   });
 
   for (const source of SOURCES) {

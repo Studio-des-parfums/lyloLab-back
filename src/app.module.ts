@@ -12,9 +12,10 @@ import { AuthModule } from './auth/auth.module.js';
 import { TeamsModule } from './teams/teams.module.js';
 import { RegulationsModule } from './regulations/regulations.module.js';
 import { StabilityModule } from './stability/stability.module.js';
+import { LibraryModule } from './library/library.module.js';
 
 @Module({
-  imports: [PrismaModule, MaterialsModule, FormulasModule, ClientsModule, ProjectsModule, AiModule, DashboardModule, AuthModule, TeamsModule, RegulationsModule, StabilityModule],
+  imports: [PrismaModule, MaterialsModule, FormulasModule, ClientsModule, ProjectsModule, AiModule, DashboardModule, AuthModule, TeamsModule, RegulationsModule, StabilityModule, LibraryModule],
   controllers: [AppController],
   providers: [AppService],
 })

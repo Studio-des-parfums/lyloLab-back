@@ -18,7 +18,11 @@ import {
 } from './formula-changes.js';
 import { MessageFieldStream } from './message-stream.js';
 import { needsWebSearch } from './web-search-intent.js';
-import { CATALOG_TOOL, CATALOG_TOOL_NAME, searchCatalog } from './catalog-tool.js';
+import {
+  CATALOG_TOOL,
+  CATALOG_TOOL_NAME,
+  searchCatalog,
+} from './catalog-tool.js';
 
 const DEFAULT_MODEL = 'gpt-6-astra';
 const DEFAULT_REASONING_EFFORT: ReasoningEffort = 'low';
@@ -72,9 +76,14 @@ function describeMaterial(material: CatalogMaterial): string {
     .sort(([, a], [, b]) => b - a)
     .slice(0, MAX_DESCRIPTORS_PER_MATERIAL)
     .map(([key, value]) => `${key} ${value}`);
-  parts.push(descriptors.length > 0 ? `notes: ${descriptors.join(', ')}` : 'notes: profil non renseigné');
+  parts.push(
+    descriptors.length > 0
+      ? `notes: ${descriptors.join(', ')}`
+      : 'notes: profil non renseigné',
+  );
 
-  if (material.sensation) parts.push(`odeur: ${material.sensation.slice(0, 100)}`);
+  if (material.sensation)
+    parts.push(`odeur: ${material.sensation.slice(0, 100)}`);
 
   const regulatory = (material.regulatory ?? {}) as {
     ifraLimit?: string | number;
@@ -83,7 +92,8 @@ function describeMaterial(material: CatalogMaterial): string {
   const limit = parseIfraLimitPercent(regulatory.ifraLimit);
   if (limit === 0) parts.push('IFRA Cat.4: INTERDITE');
   else if (limit !== null) parts.push(`IFRA Cat.4 max ${limit} %`);
-  if (regulatory.allergens?.length) parts.push(`allergènes: ${regulatory.allergens.join(', ')}`);
+  if (regulatory.allergens?.length)
+    parts.push(`allergènes: ${regulatory.allergens.join(', ')}`);
 
   const grams = material.stocks
     .map((s) => s.stockGrams)
@@ -101,7 +111,8 @@ function describeFormula(formula: FormulaSnapshotDto): string {
           .map(
             (line) =>
               `- ${line.material} : ${line.percent.toFixed(2)} % (${line.ml.toFixed(2)} ml)` +
-              (line.ifraLimitPercent !== null && line.ifraLimitPercent !== undefined
+              (line.ifraLimitPercent !== null &&
+              line.ifraLimitPercent !== undefined
                 ? `, limite IFRA ${line.ifraLimitPercent} %${line.cappedByIfra ? ' (plafonnée)' : ''}`
                 : ''),
           )
@@ -124,6 +135,75 @@ Ajustements : ${adjustments}
 Matières :
 ${lines}
 Cumuls d'allergènes : ${formula.overlappingAllergens.join(', ') || 'aucun'}`;
+}
+
+const nullable = (type: string) => ({ type: [type, 'null'] });
+const stringList = { type: 'array', items: { type: 'string' } };
+
+const REFERENCE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'name',
+    'brand',
+    'year',
+    'perfumer',
+    'familyCode',
+    'description',
+    'topNotes',
+    'heartNotes',
+    'baseNotes',
+    'interpretation',
+  ],
+  properties: {
+    name: { type: 'string' },
+    brand: nullable('string'),
+    year: nullable('integer'),
+    perfumer: nullable('string'),
+    familyCode: {
+      ...nullable('string'),
+      description: 'Code SFP, ex. D1 ou B3',
+    },
+    description: nullable('string'),
+    topNotes: stringList,
+    heartNotes: stringList,
+    baseNotes: stringList,
+    interpretation: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['material', 'role', 'evokes'],
+        properties: {
+          material: { type: 'string', description: 'Nom exact du catalogue' },
+          role: { type: 'string', enum: ['tête', 'cœur', 'fond'] },
+          evokes: {
+            type: 'string',
+            description: 'Note de la référence évoquée',
+          },
+        },
+      },
+    },
+  },
+};
+
+export interface ReferenceAnalysis {
+  name: string;
+  brand: string | null;
+  year: number | null;
+  perfumer: string | null;
+  familyCode: string | null;
+  description: string | null;
+  topNotes: string[];
+  heartNotes: string[];
+  baseNotes: string[];
+  sources: ChatSource[];
+  interpretation: {
+    materialId: string;
+    material: string;
+    role: string;
+    evokes: string;
+  }[];
 }
 
 export interface ChatSource {
@@ -152,8 +232,14 @@ function collectSources(response: OpenAI.Responses.Response): ChatSource[] {
     for (const part of item.content) {
       if (part.type !== 'output_text') continue;
       for (const annotation of part.annotations) {
-        if (annotation.type === 'url_citation' && !sources.has(annotation.url)) {
-          sources.set(annotation.url, { title: annotation.title || annotation.url, url: annotation.url });
+        if (
+          annotation.type === 'url_citation' &&
+          !sources.has(annotation.url)
+        ) {
+          sources.set(annotation.url, {
+            title: annotation.title || annotation.url,
+            url: annotation.url,
+          });
         }
       }
     }
@@ -203,8 +289,8 @@ export class AiService {
       model: process.env.OPENAI_MODEL || DEFAULT_MODEL,
       reasoning: {
         effort:
-          (process.env.OPENAI_REASONING_EFFORT as ReasoningEffort | undefined) ||
-          DEFAULT_REASONING_EFFORT,
+          (process.env.OPENAI_REASONING_EFFORT as
+            ReasoningEffort | undefined) || DEFAULT_REASONING_EFFORT,
       },
       instructions: INSTRUCTIONS,
       input: [
@@ -216,7 +302,8 @@ export class AiService {
       // reference (an existing perfume, a brand, a trend…).
       tools: [
         CATALOG_TOOL,
-        ...(process.env.OPENAI_WEB_SEARCH !== 'false' && needsWebSearch(latest.content)
+        ...(process.env.OPENAI_WEB_SEARCH !== 'false' &&
+        needsWebSearch(latest.content)
           ? [{ type: 'web_search' as const }]
           : []),
       ] as OpenAI.Responses.Tool[],
@@ -234,7 +321,10 @@ export class AiService {
     return { params, catalog };
   }
 
-  private runCatalogTool(catalog: CatalogMaterial[], rawArguments: string): string {
+  private runCatalogTool(
+    catalog: CatalogMaterial[],
+    rawArguments: string,
+  ): string {
     let args: { facettes?: string[] | null; mots_cles?: string[] | null } = {};
     try {
       args = JSON.parse(rawArguments || '{}');
@@ -242,14 +332,21 @@ export class AiService {
       /* invalid arguments: fall back to the whole catalog */
     }
     const materials = searchCatalog(catalog, args, SALIENT_DESCRIPTOR_MIN);
-    if (materials.length === 0) return 'Aucune matière trouvée pour ces critères.';
+    if (materials.length === 0)
+      return 'Aucune matière trouvée pour ces critères.';
     return materials.map(describeMaterial).join('\n');
   }
 
   private requestError(err: unknown): BadGatewayException {
-    this.logger.error('OpenAI request failed', err instanceof Error ? err.stack : err);
-    const detail = err instanceof OpenAI.APIError ? ` (${err.status} : ${err.message})` : '';
-    return new BadGatewayException(`L'assistant IA n'a pas pu répondre${detail}.`);
+    this.logger.error(
+      'OpenAI request failed',
+      err instanceof Error ? err.stack : err,
+    );
+    const detail =
+      err instanceof OpenAI.APIError ? ` (${err.status} : ${err.message})` : '';
+    return new BadGatewayException(
+      `L'assistant IA n'a pas pu répondre${detail}.`,
+    );
   }
 
   private finalize(
@@ -257,12 +354,17 @@ export class AiService {
     catalog: CatalogMaterial[],
     outputText = response.output_text,
   ): ChatResponse {
-    let parsed: { message: string; proposal: { summary: string; changes: never[] } | null };
+    let parsed: {
+      message: string;
+      proposal: { summary: string; changes: never[] } | null;
+    };
     try {
       parsed = JSON.parse(outputText);
     } catch {
       this.logger.error(`Unparseable OpenAI output: ${outputText}`);
-      throw new BadGatewayException("La réponse de l'assistant IA est illisible, réessayez.");
+      throw new BadGatewayException(
+        "La réponse de l'assistant IA est illisible, réessayez.",
+      );
     }
 
     const sources = collectSources(response);
@@ -273,8 +375,109 @@ export class AiService {
     const materialIdByName = new Map(
       catalog.map((m) => [m.name.toLowerCase(), { id: m.id, name: m.name }]),
     );
-    const { proposal, warnings } = resolveProposal(parsed.proposal, materialIdByName);
+    const { proposal, warnings } = resolveProposal(
+      parsed.proposal,
+      materialIdByName,
+    );
     return { message: parsed.message, proposal, warnings, sources };
+  }
+
+  /**
+   * Researches a reference perfume on the web and transposes it with the
+   * team's catalog. Returns a draft the perfumer reviews before saving.
+   */
+  async analyzeReference(
+    teamId: string,
+    query: string,
+  ): Promise<ReferenceAnalysis> {
+    const client = this.getClient();
+    const [catalog, families] = await Promise.all([
+      this.prisma.material.findMany({
+        where: { teamId },
+        select: { name: true, family: true, descriptors: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.olfactiveFamily.findMany({
+        select: { code: true, name: true },
+      }),
+    ]);
+    const catalogText = catalog
+      .map((m) => {
+        const notes = Object.entries(
+          (m.descriptors ?? {}) as Record<string, number>,
+        )
+          .filter(([, v]) => v >= SALIENT_DESCRIPTOR_MIN)
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, 4)
+          .map(([k]) => k)
+          .join(', ');
+        return `- ${m.name}${m.family ? ` (${m.family})` : ''}${notes ? ` : ${notes}` : ''}`;
+      })
+      .join('\n');
+    const familyText = families.map((f) => `${f.code} ${f.name}`).join(' ; ');
+
+    let response: OpenAI.Responses.Response;
+    try {
+      response = await client.responses.create({
+        model: process.env.OPENAI_MODEL || DEFAULT_MODEL,
+        reasoning: { effort: 'low' },
+        instructions: `Tu es l'assistant de la bibliothèque olfactive de Lylo Lab. Recherche sur le web le parfum de référence demandé (parfum existant, marque, tendance) : marque, année, parfumeur, famille olfactive, pyramide (notes de tête, de cœur, de fond) et une courte description. Utilise uniquement des informations trouvées dans tes sources ; mets null ou une liste vide si une information est introuvable.
+Classe-le dans une famille ou sous-famille de la classification de la Société Française des Parfumeurs, en donnant son code : ${familyText}.
+Puis propose une interprétation avec les matières du catalogue ci-dessous (noms exacts uniquement), en indiquant pour chacune son rôle (tête, cœur ou fond) et la note de la référence qu'elle évoque. Ne prétends jamais reproduire la formule exacte. Réponds en français, de façon concise.
+
+Catalogue :
+${catalogText}`,
+        input: query,
+        tools: [{ type: 'web_search' }],
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'reference_perfume',
+            schema: REFERENCE_SCHEMA,
+            strict: true,
+          },
+          verbosity: 'low',
+        },
+      });
+    } catch (err) {
+      throw this.requestError(err);
+    }
+
+    let parsed: Omit<ReferenceAnalysis, 'sources' | 'interpretation'> & {
+      interpretation: { material: string; role: string; evokes: string }[];
+    };
+    try {
+      parsed = JSON.parse(response.output_text);
+    } catch {
+      throw new BadGatewayException(
+        "La réponse de l'assistant IA est illisible, réessayez.",
+      );
+    }
+    const byName = new Map(
+      (
+        await this.prisma.material.findMany({
+          where: { teamId },
+          select: { id: true, name: true },
+        })
+      ).map((m) => [m.name.toLowerCase(), m]),
+    );
+    return {
+      ...parsed,
+      sources: collectSources(response),
+      interpretation: parsed.interpretation.flatMap((i) => {
+        const material = byName.get(i.material.toLowerCase());
+        return material
+          ? [
+              {
+                materialId: material.id,
+                material: material.name,
+                role: i.role,
+                evokes: i.evokes,
+              },
+            ]
+          : [];
+      }),
+    };
   }
 
   async chat(teamId: string, dto: ChatDto): Promise<ChatResponse> {
@@ -285,7 +488,9 @@ export class AiService {
       }
       if (event.type === 'error') throw new BadGatewayException(event.message);
     }
-    throw new BadGatewayException("L'assistant IA n'a pas terminé sa réponse, réessayez.");
+    throw new BadGatewayException(
+      "L'assistant IA n'a pas terminé sa réponse, réessayez.",
+    );
   }
 
   /**
@@ -312,8 +517,12 @@ export class AiService {
             {
               ...params,
               input,
-              ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
-              ...(round === MAX_TOOL_ROUNDS - 1 ? { tool_choice: 'none' as const } : {}),
+              ...(previousResponseId
+                ? { previous_response_id: previousResponseId }
+                : {}),
+              ...(round === MAX_TOOL_ROUNDS - 1
+                ? { tool_choice: 'none' as const }
+                : {}),
               stream: true,
             },
             { signal },
@@ -336,7 +545,10 @@ export class AiService {
               yield { type: 'status', status: 'search' };
             } else if (event.type === 'response.completed') {
               completed = event.response;
-            } else if (event.type === 'response.failed' || event.type === 'error') {
+            } else if (
+              event.type === 'response.failed' ||
+              event.type === 'error'
+            ) {
               throw this.requestError(event);
             }
           }
@@ -345,14 +557,20 @@ export class AiService {
           throw this.requestError(err);
         }
         if (!completed) {
-          throw new BadGatewayException("L'assistant IA n'a pas terminé sa réponse, réessayez.");
+          throw new BadGatewayException(
+            "L'assistant IA n'a pas terminé sa réponse, réessayez.",
+          );
         }
 
         const calls = completed.output.filter(
-          (item): item is OpenAI.Responses.ResponseFunctionToolCall => item.type === 'function_call',
+          (item): item is OpenAI.Responses.ResponseFunctionToolCall =>
+            item.type === 'function_call',
         );
         if (calls.length === 0) {
-          yield { type: 'done', ...this.finalize(completed, catalog, outputText) };
+          yield {
+            type: 'done',
+            ...this.finalize(completed, catalog, outputText),
+          };
           return;
         }
 
@@ -367,11 +585,14 @@ export class AiService {
               : `Outil inconnu : ${call.name}`,
         }));
       }
-      throw new BadGatewayException("L'assistant IA n'a pas terminé sa réponse, réessayez.");
+      throw new BadGatewayException(
+        "L'assistant IA n'a pas terminé sa réponse, réessayez.",
+      );
     } catch (err) {
       if (signal?.aborted) return;
       const message =
-        err instanceof BadGatewayException || err instanceof ServiceUnavailableException
+        err instanceof BadGatewayException ||
+        err instanceof ServiceUnavailableException
           ? err.message
           : "L'assistant IA n'a pas pu répondre.";
       yield { type: 'error', message };

@@ -122,6 +122,14 @@ export class MaterialsService {
             ? { physicochemicalState: cleanText(dto.physicochemicalState) ?? null }
             : {}),
           ...(dto.waterBase !== undefined ? { waterBase: dto.waterBase } : {}),
+          ...(dto.originCountries !== undefined
+            ? {
+                originCountries:
+                  dto.originCountries === null
+                    ? Prisma.JsonNull
+                    : [...new Set(dto.originCountries.map((c) => c.trim()).filter(Boolean))],
+              }
+            : {}),
           ...(dto.regulatory !== undefined
             ? {
                 regulatory:

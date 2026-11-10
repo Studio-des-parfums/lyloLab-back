@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsIn,
   IsNumber,
@@ -97,4 +98,10 @@ export class UpdateMaterialDto {
   @IsOptional()
   @IsObject()
   regulatory?: Record<string, unknown> | null;
+
+  /** Countries or regions of origin (names of the countries table). */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  originCountries?: string[] | null;
 }

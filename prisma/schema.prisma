@@ -20,6 +20,10 @@ model Team {
   formulas  Formula[]
   regulations Regulation[]
   stabilityTests StabilityTest[]
+  facetDefinitions FacetDefinition[]
+  referencePerfumes ReferencePerfume[]
+  materialNotes  MaterialNote[]
+  blindTests     BlindTest[]
 
   @@map("teams")
 }
@@ -53,6 +57,8 @@ model Material {
   source          String  @default("catalog")
   origin          String  @default("natural")
   regulatory      Json?
+  // Countries or regions the material comes from (names of the countries table).
+  originCountries Json?   @map("origin_countries")
 
   // Lab inventory data (Rangement frigo MP). `nature` is the chemical nature
   // of the raw material, distinct from `origin` (catalog vs formula-derived).
@@ -78,6 +84,7 @@ model Material {
   formulaLines FormulaLine[]
   stocks       MaterialStock[]
   regulationEntries RegulationEntry[]
+  notes             MaterialNote[]
 
   teamId String @map("team_id")
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
@@ -118,6 +125,7 @@ model Formula {
 
   lines           FormulaLine[]
   stabilityTests  StabilityTest[]
+  references      ReferencePerfume[]
   materializedAs  Material?     @relation("FormulaAsMaterial")
 
   createdById   String? @map("created_by_id")
@@ -380,4 +388,116 @@ model StabilitySpec {
 
   @@unique([substance, parameter])
   @@map("stability_specs")
+}
+
+// Definition of one of the 24 olfactory facets. Rows with teamId null are the
+// defaults; a team can override them with its own wording.
+model FacetDefinition {
+  id          String  @id @default(uuid())
+  facet       String
+  description String  @db.Text
+  // Typical raw materials or odours, free text.
+  examples    String? @db.Text
+
+  teamId String? @map("team_id")
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([facet, teamId])
+  @@map("facet_definitions")
+}
+
+// Olfactive families and subfamilies of the Société Française des Parfumeurs
+// classification (A to G, then A1, A2…). Shared by every team.
+model OlfactiveFamily {
+  code        String  @id
+  name        String
+  parentCode  String? @map("parent_code")
+  description String? @db.Text
+  // Facets that characterise it, deduced from its name (indicative profile).
+  facets      Json
+  sourceUrl   String? @map("source_url") @db.Text
+  position    Int     @default(0)
+
+  @@map("olfactive_families")
+}
+
+// A reference perfume (existing fragrance, brand, trend) and how it was
+// interpreted with the team's materials.
+model ReferencePerfume {
+  id          String   @id @default(uuid())
+  name        String
+  brand       String?
+  year        Int?
+  perfumer    String?
+  familyCode  String?  @map("family_code")
+  topNotes    Json     @map("top_notes")
+  heartNotes  Json     @map("heart_notes")
+  baseNotes   Json     @map("base_notes")
+  description String?  @db.Text
+  // [{ title, url }]
+  sources     Json
+  // Closest catalog materials: [{ materialId, material, role }]
+  interpretation Json
+  createdByName  String?  @map("created_by_name")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  formulas Formula[]
+
+  teamId String @map("team_id")
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@map("reference_perfumes")
+}
+
+// A perfumer's own impression of a material, shared with the team.
+model MaterialNote {
+  id         String   @id @default(uuid())
+  text       String   @db.Text
+  // Personal liking or quality score, 1 to 5.
+  rating     Int?
+  authorId   String?  @map("author_id")
+  authorName String   @map("author_name")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  materialId String   @map("material_id")
+  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  teamId String @map("team_id")
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([materialId])
+  @@map("material_notes")
+}
+
+// Blind smelling test: coded strips, the tester guesses each material.
+model BlindTest {
+  id          String    @id @default(uuid())
+  userId      String?   @map("user_id")
+  userName    String    @map("user_name")
+  // [{ code, materialId, guessMaterialId, guessFacet }]
+  items       Json
+  // Share of materials recognised (0 to 1), set when submitted.
+  score       Float?
+  facetScore  Float?    @map("facet_score")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+
+  teamId String @map("team_id")
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@map("blind_tests")
+}
+
+// Countries and regions used as material origins. `isoNumeric` (ISO 3166-1
+// numeric) places a country on the world map; regions have none.
+model Country {
+  name       String  @id
+  isoNumeric String? @map("iso_numeric")
+  continent  String
+  // country | region
+  kind       String  @default("country")
+
+  @@map("countries")
 }
