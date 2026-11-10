@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { RegulationsService } from '../regulations/regulations.service.js';
 import type { CreateFormulaDto } from './dto/create-formula.dto.js';
 import type { UpdateFormulaStatusDto } from './dto/update-formula-status.dto.js';
 import type { AuthUser } from '../auth/auth-user.js';
@@ -52,7 +53,10 @@ const AUTHOR_SELECT = { createdBy: { select: { id: true, name: true } } } as con
 
 @Injectable()
 export class FormulasService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly regulations: RegulationsService,
+  ) {}
 
   findAll(teamId: string, status?: 'draft' | 'completed', projectId?: string) {
     return this.prisma.formula.findMany({
@@ -207,7 +211,7 @@ export class FormulasService {
     const regulatory = this.aggregateRegulatory(formula.lines);
 
     try {
-      return await this.prisma.material.create({
+      const material = await this.prisma.material.create({
         data: {
           teamId,
           name: formula.name,
@@ -218,6 +222,8 @@ export class FormulasService {
           regulatory: (regulatory as Prisma.InputJsonValue) ?? Prisma.JsonNull,
         },
       });
+      await this.regulations.sync(teamId, [material.id]);
+      return material;
     } catch (err) {
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&

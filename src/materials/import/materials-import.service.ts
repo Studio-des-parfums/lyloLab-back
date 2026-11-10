@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { RegulationsService } from '../../regulations/regulations.service.js';
 import { readTables, type Table } from './file-readers.js';
 import {
   DESCRIPTOR_MAX,
@@ -300,7 +301,10 @@ function fieldsOf(material: ImportedMaterial): string[] {
 
 @Injectable()
 export class MaterialsImportService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly regulations: RegulationsService,
+  ) {}
 
   /** Reads the file and, when `apply` is true, creates or updates the materials. */
   async import(teamId: string, fileName: string, buffer: Buffer, apply: boolean): Promise<ImportReport> {
@@ -334,6 +338,7 @@ export class MaterialsImportService {
           });
         }
       }
+      await this.regulations.sync(teamId);
     }
 
     return {

@@ -10,9 +10,10 @@ import { AiModule } from './ai/ai.module.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { TeamsModule } from './teams/teams.module.js';
+import { RegulationsModule } from './regulations/regulations.module.js';
 
 @Module({
-  imports: [PrismaModule, MaterialsModule, FormulasModule, ClientsModule, ProjectsModule, AiModule, DashboardModule, AuthModule, TeamsModule],
+  imports: [PrismaModule, MaterialsModule, FormulasModule, ClientsModule, ProjectsModule, AiModule, DashboardModule, AuthModule, TeamsModule, RegulationsModule],
   controllers: [AppController],
   providers: [AppService],
 })

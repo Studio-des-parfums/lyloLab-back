@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { RegulationsService } from '../regulations/regulations.service.js';
 import type { UpdateMaterialDto } from './dto/update-material.dto.js';
 import type {
   CreateMaterialStockDto,
@@ -32,7 +33,10 @@ function cleanDescriptors(
 
 @Injectable()
 export class MaterialsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly regulations: RegulationsService,
+  ) {}
 
   findAll(teamId: string, search?: string) {
     return this.prisma.material.findMany({
@@ -62,7 +66,7 @@ export class MaterialsService {
     await this.ensureMaterial(teamId, id);
 
     try {
-      return await this.prisma.material.update({
+      const updated = await this.prisma.material.update({
         where: { id },
         data: {
           ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
@@ -129,6 +133,11 @@ export class MaterialsService {
         },
         include: { stocks: { orderBy: { id: 'asc' } } },
       });
+      // Keep the material ↔ regulation links in step with its regulatory data.
+      if (dto.regulatory !== undefined || dto.flavorRestriction !== undefined) {
+        await this.regulations.sync(teamId, [id]);
+      }
+      return updated;
     } catch (err) {
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&

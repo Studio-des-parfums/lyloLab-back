@@ -18,6 +18,7 @@ model Team {
   clients   Client[]
   projects  Project[]
   formulas  Formula[]
+  regulations Regulation[]
 
   @@map("teams")
 }
@@ -75,6 +76,7 @@ model Material {
 
   formulaLines FormulaLine[]
   stocks       MaterialStock[]
+  regulationEntries RegulationEntry[]
 
   teamId String @map("team_id")
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
@@ -178,4 +180,104 @@ model FormulaLine {
   material Material @relation(fields: [materialId], references: [id])
 
   @@map("formula_lines")
+}
+
+// A regulation: either an official one (shared by every team, teamId null,
+// identified by `code`) or a custom one created by a team (client
+// specification, internal policy…).
+model Regulation {
+  id            String    @id @default(uuid())
+  // Stable key of an official regulation, used by the sync rules (null for custom ones).
+  code          String?   @unique
+  name          String
+  description   String?   @db.Text
+  // Where the rule applies, used to filter the regulations page.
+  continent     String?
+  country       String?
+  // Date from which the regulation applies, when it is not in force yet.
+  effectiveFrom DateTime? @map("effective_from")
+  // "in_force", "upcoming" (adopted, not applicable yet) or "proposal".
+  status        String    @default("in_force")
+  // How its substance list applies to materials: "declare" (label above a
+  // threshold) or "ban". Null when the regulation has a dedicated rule.
+  substanceRule String?   @map("substance_rule")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  entries     RegulationEntry[]
+  substances  RegulatedSubstance[]
+  sources     RegulationSource[]
+
+  teamId String? @map("team_id")
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@map("regulations")
+}
+
+// Link table between materials and regulations: one row per material
+// concerned by a regulation, with its status for that regulation.
+model RegulationEntry {
+  id         String   @id @default(uuid())
+  // Short status ("Max 0.6 %", "Interdite", "Limonene, Linalool"…).
+  status     String
+  // Maximum % in the formula: 0 = banned, null = no numeric limit.
+  maxPercent Float?   @map("max_percent")
+  detail     String?  @db.Text
+  note       String?  @db.Text
+  // "sync" rows are recomputed from the material's regulatory data;
+  // "manual" rows are entered by hand on custom regulations.
+  origin     String   @default("manual")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  regulationId String     @map("regulation_id")
+  regulation   Regulation @relation(fields: [regulationId], references: [id], onDelete: Cascade)
+  materialId   String     @map("material_id")
+  material     Material   @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([regulationId, materialId])
+  @@index([materialId])
+  @@map("regulation_entries")
+}
+
+// Substances listed by a regulation (e.g. the 26 EU fragrance allergens).
+model RegulatedSubstance {
+  id        String  @id @default(uuid())
+  // Canonical name, as used in materials' regulatory.allergens.
+  name      String
+  casNumber String? @map("cas_number")
+  // Other spellings matched as the same substance.
+  aliases   Json?
+  note      String? @db.Text
+
+  regulationId String     @map("regulation_id")
+  regulation   Regulation @relation(fields: [regulationId], references: [id], onDelete: Cascade)
+
+  @@unique([regulationId, name])
+  @@map("regulated_substances")
+}
+
+// Official texts and references (from the "References tableau" sheet).
+model OfficialSource {
+  id           String  @id @default(uuid())
+  ref          Int     @unique
+  jurisdiction String
+  organisation String
+  title        String  @db.Text
+  date         String
+  url          String  @db.Text
+  usage        String? @db.Text
+
+  regulations RegulationSource[]
+
+  @@map("official_sources")
+}
+
+model RegulationSource {
+  regulationId String         @map("regulation_id")
+  regulation   Regulation     @relation(fields: [regulationId], references: [id], onDelete: Cascade)
+  sourceId     String         @map("source_id")
+  source       OfficialSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@id([regulationId, sourceId])
+  @@map("regulation_sources")
 }

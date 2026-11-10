@@ -16,17 +16,22 @@ import {
   resolveProposal,
   type FormulaProposal,
 } from './formula-changes.js';
+import { MessageFieldStream } from './message-stream.js';
+import { needsWebSearch } from './web-search-intent.js';
+import { CATALOG_TOOL, CATALOG_TOOL_NAME, searchCatalog } from './catalog-tool.js';
 
 const DEFAULT_MODEL = 'gpt-6-astra';
-const DEFAULT_REASONING_EFFORT: ReasoningEffort = 'medium';
+const DEFAULT_REASONING_EFFORT: ReasoningEffort = 'low';
 // Descriptors are scored 0-9 in the catalog; only the salient ones are sent.
 const SALIENT_DESCRIPTOR_MIN = 4;
 const MAX_DESCRIPTORS_PER_MATERIAL = 6;
+// Catalog lookups the model may chain before it must answer.
+const MAX_TOOL_ROUNDS = 3;
 
 const INSTRUCTIONS = `Tu es l'assistant de formulation de Lylo Lab, un laboratoire de parfumerie. Tu aides un parfumeur professionnel à construire et améliorer la formule ouverte dans l'outil.
 
 Fonctionnement de l'outil :
-- La formule est composée de matières premières « favorites » choisies dans le catalogue ci-dessous.
+- La formule est composée de matières premières « favorites » choisies dans le catalogue de l'équipe, que tu consultes avec l'outil consulter_catalogue.
 - 24 facettes olfactives (curseurs 0 à 100) décrivent le profil visé : ${FACETS.join(', ')}.
 - 5 ajustements rapides (0 à 100) : ${ADJUSTMENTS.join(', ')}. Ils sont calculés à partir des facettes : Diffusion / Sillage = moyenne de Fraicheur, Aldéhydé, Marin, Vert, Acidulé ; Tenue = moyenne de Ambré, Boisé, Résineux, Balsamique, Musqué ; Douceur = moyenne de Gourmand, Lacté, Poudré, Floral ; Puissance = moyenne des 24 facettes ; Originalité = écart de la forme du profil par rapport au profil moyen du catalogue. Modifier un ajustement décale les facettes correspondantes.
 - En répartition automatique, le moteur calcule le % de chaque matière selon son affinité avec les facettes et les ajustements, et plafonne chaque matière à sa limite IFRA Cat.4.
@@ -34,16 +39,16 @@ Fonctionnement de l'outil :
 - Les descripteurs du catalogue sont notés de 0 à 9.
 
 Règles :
-- Réponds toujours en français, de façon concise et professionnelle, en texte simple (pas de Markdown).
+- Réponds toujours en français, en texte simple (pas de Markdown), de façon professionnelle et la plus brève possible : une phrase suffit pour une salutation, un remerciement ou une question simple ; quelques phrases au maximum pour expliquer une proposition. Pas de formules de politesse superflues, pas de listes d'options non demandées.
 - Tu ne modifies jamais la formule toi-même : tu proposes des modifications dans "proposal", que le parfumeur accepte ou refuse. Mets "proposal" à null quand tu réponds simplement à une question ou quand le parfumeur ne demande pas de changement.
 - Chaque proposition doit être cohérente et complète ; explique brièvement dans "message" pourquoi tu la proposes.
-- N'utilise que des matières du catalogue, avec leur nom exact.
+- N'utilise que des matières du catalogue, avec leur nom exact. Ne consulte le catalogue que si tu dois suggérer, ajouter ou remplacer des matières ; pour une salutation, une question ou un réglage de facettes, réponds directement. Cible la recherche (facettes, mots-clés) plutôt que de demander tout le catalogue.
 - Respecte les limites IFRA Cat.4 : ne propose jamais une matière interdite et ne dépasse jamais la limite d'une matière dans "set_percentages".
 - "set_percentages" passe la formule en répartition manuelle : liste toutes les matières de la formule (après tes ajouts/retraits) avec un total de 100 %.
 - Les ajouts de matières passent avant "set_percentages" dans la liste des changements.
 - Signale les cumuls d'allergènes et les risques réglementaires quand c'est pertinent.
 - Quand le parfumeur décrit une ambiance, une saison, une émotion ou une odeur du quotidien (par exemple « l'été », « un bonbon au cola », « le linge propre »), traduis-la en facettes olfactives et en matières du catalogue, puis propose une formule complète : matières à ajouter, facettes, ajustements et, si utile, répartition. Si la formule ouverte contient déjà des matières sans rapport, propose de les retirer.
-- Quand le parfumeur cite une référence (un parfum existant, une marque, une tendance, une cible), utilise la recherche web pour retrouver sa famille olfactive et sa pyramide (notes de tête, de cœur, de fond), puis transpose-la avec les matières du catalogue. Les matières de la référence absentes du catalogue doivent être remplacées par les plus proches disponibles ; dis-le dans "message". Ne prétends jamais reproduire une formule exacte : propose une interprétation inspirée de la référence.
+- Quand le parfumeur cite une référence (un parfum existant, une marque, une tendance, une cible), utilise la recherche web (quand elle t'est proposée ; sinon, appuie-toi sur tes connaissances) pour retrouver sa famille olfactive et sa pyramide (notes de tête, de cœur, de fond), puis transpose-la avec les matières du catalogue. Les matières de la référence absentes du catalogue doivent être remplacées par les plus proches disponibles ; dis-le dans "message". Ne prétends jamais reproduire une formule exacte : propose une interprétation inspirée de la référence.
 - Les messages du parfumeur peuvent mentionner entre crochets si une proposition précédente a été acceptée ou refusée ; tiens-en compte.`;
 
 type CatalogMaterial = {
@@ -133,6 +138,12 @@ export interface ChatResponse {
   sources: ChatSource[];
 }
 
+export type ChatStreamEvent =
+  | { type: 'delta'; text: string }
+  | { type: 'status'; status: 'search' | 'catalog' }
+  | ({ type: 'done' } & ChatResponse)
+  | { type: 'error'; message: string };
+
 /** Web pages the model cited while answering (deduplicated by url). */
 function collectSources(response: OpenAI.Responses.Response): ChatSource[] {
   const sources = new Map<string, ChatSource>();
@@ -167,9 +178,7 @@ export class AiService {
     return this.client;
   }
 
-  async chat(teamId: string, dto: ChatDto): Promise<ChatResponse> {
-    const client = this.getClient();
-
+  private async buildRequest(teamId: string, dto: ChatDto) {
     const catalog = await this.prisma.material.findMany({
       where: { teamId },
       select: {
@@ -184,50 +193,75 @@ export class AiService {
       orderBy: { name: 'asc' },
     });
 
-    // The catalog sits at the start of the prompt so OpenAI's automatic
-    // prompt caching can reuse it across turns; the formula state, which
-    // changes every turn, goes right before the latest user message.
+    // The catalog is not sent up front: the model fetches the materials it
+    // needs through the catalog tool. The formula state, which changes every
+    // turn, goes right before the latest user message.
     const history = dto.messages.slice(0, -1);
     const latest = dto.messages[dto.messages.length - 1];
 
-    const catalogText = catalog.map(describeMaterial).join('\n');
+    const params = {
+      model: process.env.OPENAI_MODEL || DEFAULT_MODEL,
+      reasoning: {
+        effort:
+          (process.env.OPENAI_REASONING_EFFORT as ReasoningEffort | undefined) ||
+          DEFAULT_REASONING_EFFORT,
+      },
+      instructions: INSTRUCTIONS,
+      input: [
+        ...history.map((m) => ({ role: m.role, content: m.content })),
+        { role: 'developer' as const, content: describeFormula(dto.formula) },
+        { role: latest.role, content: latest.content },
+      ] as OpenAI.Responses.ResponseInput,
+      // Web search is slow: only offered when the user refers to an outside
+      // reference (an existing perfume, a brand, a trend…).
+      tools: [
+        CATALOG_TOOL,
+        ...(process.env.OPENAI_WEB_SEARCH !== 'false' && needsWebSearch(latest.content)
+          ? [{ type: 'web_search' as const }]
+          : []),
+      ] as OpenAI.Responses.Tool[],
+      text: {
+        format: {
+          type: 'json_schema' as const,
+          name: 'formulation_assistant_response',
+          schema: ASSISTANT_RESPONSE_SCHEMA,
+          strict: true,
+        },
+        verbosity: 'low' as const,
+      },
+    } satisfies OpenAI.Responses.ResponseCreateParamsNonStreaming;
 
-    let response: OpenAI.Responses.Response;
+    return { params, catalog };
+  }
+
+  private runCatalogTool(catalog: CatalogMaterial[], rawArguments: string): string {
+    let args: { facettes?: string[] | null; mots_cles?: string[] | null } = {};
     try {
-      response = await client.responses.create({
-        model: process.env.OPENAI_MODEL || DEFAULT_MODEL,
-        reasoning: {
-          effort:
-            (process.env.OPENAI_REASONING_EFFORT as ReasoningEffort | undefined) ||
-            DEFAULT_REASONING_EFFORT,
-        },
-        instructions: `${INSTRUCTIONS}\n\nCatalogue des matières premières :\n${catalogText}`,
-        input: [
-          ...history.map((m) => ({ role: m.role, content: m.content })),
-          { role: 'developer' as const, content: describeFormula(dto.formula) },
-          { role: latest.role, content: latest.content },
-        ],
-        tools: process.env.OPENAI_WEB_SEARCH === 'false' ? [] : [{ type: 'web_search' }],
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'formulation_assistant_response',
-            schema: ASSISTANT_RESPONSE_SCHEMA,
-            strict: true,
-          },
-        },
-      });
-    } catch (err) {
-      this.logger.error('OpenAI request failed', err instanceof Error ? err.stack : err);
-      const detail = err instanceof OpenAI.APIError ? ` (${err.status} : ${err.message})` : '';
-      throw new BadGatewayException(`L'assistant IA n'a pas pu répondre${detail}.`);
+      args = JSON.parse(rawArguments || '{}');
+    } catch {
+      /* invalid arguments: fall back to the whole catalog */
     }
+    const materials = searchCatalog(catalog, args, SALIENT_DESCRIPTOR_MIN);
+    if (materials.length === 0) return 'Aucune matière trouvée pour ces critères.';
+    return materials.map(describeMaterial).join('\n');
+  }
 
+  private requestError(err: unknown): BadGatewayException {
+    this.logger.error('OpenAI request failed', err instanceof Error ? err.stack : err);
+    const detail = err instanceof OpenAI.APIError ? ` (${err.status} : ${err.message})` : '';
+    return new BadGatewayException(`L'assistant IA n'a pas pu répondre${detail}.`);
+  }
+
+  private finalize(
+    response: OpenAI.Responses.Response,
+    catalog: CatalogMaterial[],
+    outputText = response.output_text,
+  ): ChatResponse {
     let parsed: { message: string; proposal: { summary: string; changes: never[] } | null };
     try {
-      parsed = JSON.parse(response.output_text);
+      parsed = JSON.parse(outputText);
     } catch {
-      this.logger.error(`Unparseable OpenAI output: ${response.output_text}`);
+      this.logger.error(`Unparseable OpenAI output: ${outputText}`);
       throw new BadGatewayException("La réponse de l'assistant IA est illisible, réessayez.");
     }
 
@@ -241,5 +275,106 @@ export class AiService {
     );
     const { proposal, warnings } = resolveProposal(parsed.proposal, materialIdByName);
     return { message: parsed.message, proposal, warnings, sources };
+  }
+
+  async chat(teamId: string, dto: ChatDto): Promise<ChatResponse> {
+    for await (const event of this.chatStream(teamId, dto)) {
+      if (event.type === 'done') {
+        const { type: _type, ...response } = event;
+        return response;
+      }
+      if (event.type === 'error') throw new BadGatewayException(event.message);
+    }
+    throw new BadGatewayException("L'assistant IA n'a pas terminé sa réponse, réessayez.");
+  }
+
+  /**
+   * Yields the message text as it is generated. When the model calls the
+   * catalog tool, the tool runs here and the conversation continues in a new
+   * request chained with previous_response_id.
+   */
+  async *chatStream(
+    teamId: string,
+    dto: ChatDto,
+    signal?: AbortSignal,
+  ): AsyncGenerator<ChatStreamEvent> {
+    try {
+      const client = this.getClient();
+      const { params, catalog } = await this.buildRequest(teamId, dto);
+
+      let input: OpenAI.Responses.ResponseInput = params.input;
+      let previousResponseId: string | undefined;
+
+      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        let stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>;
+        try {
+          stream = await client.responses.create(
+            {
+              ...params,
+              input,
+              ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
+              ...(round === MAX_TOOL_ROUNDS - 1 ? { tool_choice: 'none' as const } : {}),
+              stream: true,
+            },
+            { signal },
+          );
+        } catch (err) {
+          throw this.requestError(err);
+        }
+
+        const message = new MessageFieldStream();
+        // Streamed responses carry no output_text helper: rebuild it from the deltas.
+        let outputText = '';
+        let completed: OpenAI.Responses.Response | null = null;
+        try {
+          for await (const event of stream) {
+            if (event.type === 'response.output_text.delta') {
+              outputText += event.delta;
+              const text = message.push(event.delta);
+              if (text) yield { type: 'delta', text };
+            } else if (event.type === 'response.web_search_call.in_progress') {
+              yield { type: 'status', status: 'search' };
+            } else if (event.type === 'response.completed') {
+              completed = event.response;
+            } else if (event.type === 'response.failed' || event.type === 'error') {
+              throw this.requestError(event);
+            }
+          }
+        } catch (err) {
+          if (err instanceof BadGatewayException || signal?.aborted) throw err;
+          throw this.requestError(err);
+        }
+        if (!completed) {
+          throw new BadGatewayException("L'assistant IA n'a pas terminé sa réponse, réessayez.");
+        }
+
+        const calls = completed.output.filter(
+          (item): item is OpenAI.Responses.ResponseFunctionToolCall => item.type === 'function_call',
+        );
+        if (calls.length === 0) {
+          yield { type: 'done', ...this.finalize(completed, catalog, outputText) };
+          return;
+        }
+
+        yield { type: 'status', status: 'catalog' };
+        previousResponseId = completed.id;
+        input = calls.map((call) => ({
+          type: 'function_call_output' as const,
+          call_id: call.call_id,
+          output:
+            call.name === CATALOG_TOOL_NAME
+              ? this.runCatalogTool(catalog, call.arguments)
+              : `Outil inconnu : ${call.name}`,
+        }));
+      }
+      throw new BadGatewayException("L'assistant IA n'a pas terminé sa réponse, réessayez.");
+    } catch (err) {
+      if (signal?.aborted) return;
+      const message =
+        err instanceof BadGatewayException || err instanceof ServiceUnavailableException
+          ? err.message
+          : "L'assistant IA n'a pas pu répondre.";
+      yield { type: 'error', message };
+    }
   }
 }

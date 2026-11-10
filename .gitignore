@@ -7,3 +7,6 @@ coverage
 .DS_Store
 data/
 *.tsbuildinfo
+
+# Python
+__pycache__/
