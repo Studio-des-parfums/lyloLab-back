@@ -1276,6 +1276,75 @@ const CANADA_LIST_1 = EU_ALLERGENS_26.filter(
 /** Korea: the 26 minus HICC, banned in Korea (MFDS / ChemLinked). */
 const KOREA_25 = EU_ALLERGENS_26.filter((s) => s.name !== HICC);
 
+/**
+ * Maximum peroxide values set by Annex III of Regulation (EC) No 1223/2009 as
+ * worded by Regulation (EU) 2023/1545 (column i), read from the official text.
+ */
+const PEROXIDE_SPECS: {
+  entry: string;
+  substance: string;
+  casNumber: string;
+  aliases: string[];
+  maxValue: number;
+}[] = [
+  {
+    entry: '88',
+    substance: 'Limonene',
+    casNumber: '5989-27-5 / 138-86-3 / 7705-14-8',
+    aliases: ['d-Limonene', 'Dipentene'],
+    maxValue: 20,
+  },
+  {
+    entry: '109',
+    substance: 'Pinus Mugo Leaf Oil',
+    casNumber: '90082-72-7',
+    aliases: ['Pinus Mugo Twig Oil', 'Pinus mugo oil'],
+    maxValue: 10,
+  },
+  {
+    entry: '114',
+    substance: 'Pinus Pumila Needle Extract',
+    casNumber: '97676-05-6',
+    aliases: ['Pinus Pumila Twig Leaf Oil'],
+    maxValue: 10,
+  },
+  {
+    entry: '122',
+    substance: 'Cedrus Atlantica Wood Oil',
+    casNumber: '92201-55-3 / 8023-85-6',
+    aliases: ['Atlas cedarwood oil', 'Cèdre Atlas'],
+    maxValue: 10,
+  },
+  {
+    entry: '124',
+    substance: 'Turpentine',
+    casNumber: '9005-90-7 / 8006-64-2 / 8052-14-0',
+    aliases: ['Turpentine oil', 'Térébenthine'],
+    maxValue: 10,
+  },
+  {
+    entry: '131',
+    substance: 'Alpha-Terpinene',
+    casNumber: '99-86-5',
+    aliases: [],
+    maxValue: 10,
+  },
+  {
+    entry: '133',
+    substance: 'Terpinolene',
+    casNumber: '586-62-9',
+    aliases: [],
+    maxValue: 10,
+  },
+  {
+    entry: '371',
+    substance: 'Pinene',
+    casNumber: '80-56-8 / 7785-70-8 / 127-91-3 / 18172-67-3',
+    aliases: ['alpha-Pinene', 'beta-Pinene'],
+    maxValue: 10,
+  },
+];
+
 async function main() {
   const prisma = new PrismaClient({
     adapter: new PrismaMariaDb(process.env.DATABASE_URL!),
@@ -1376,6 +1445,26 @@ async function main() {
     });
   }
 
+  for (const { entry, ...spec } of PEROXIDE_SPECS) {
+    const data = {
+      ...spec,
+      parameter: 'peroxide_value',
+      unit: 'mmol/L',
+      note: `Annexe III, entrée ${entry} : indice de peroxyde inférieur à ${spec.maxValue} mmol/L.`,
+      sourceRef: 8,
+    };
+    await prisma.stabilitySpec.upsert({
+      where: {
+        substance_parameter: {
+          substance: spec.substance,
+          parameter: 'peroxide_value',
+        },
+      },
+      create: data,
+      update: data,
+    });
+  }
+
   // Regulations removed from the list above (e.g. the old single allergen one).
   await prisma.regulation.deleteMany({
     where: { teamId: null, code: { notIn: REGULATIONS.map((r) => r.code) } },
@@ -1393,7 +1482,7 @@ async function main() {
     console.log(`${team.name} : ${count} liaisons matière ↔ réglementation.`);
   }
   console.log(
-    `${REGULATIONS.length} réglementations, ${SOURCES.length} sources, ${EU_ALLERGENS_26.length} allergènes historiques + ${EU_ALLERGENS_2023_1545.length} ajoutés par le 2023/1545 ; listes Canada, Corée, Royaume-Uni et interdictions Omnibus VII / SI 2026/23.`,
+    `${REGULATIONS.length} réglementations, ${SOURCES.length} sources, ${EU_ALLERGENS_26.length} allergènes historiques + ${EU_ALLERGENS_2023_1545.length} ajoutés par le 2023/1545 ; listes Canada, Corée, Royaume-Uni et interdictions Omnibus VII / SI 2026/23 ; ${PEROXIDE_SPECS.length} spécifications d'indice de peroxyde.`,
   );
   await prisma.$disconnect();
 }
