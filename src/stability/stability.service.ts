@@ -6,8 +6,11 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { AuthUser } from '../auth/auth-user.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { StorageService } from '../storage/storage.service.js';
 import type {
   CreateCampaignDto,
+  DailyNoteDto,
+  WatchersDto,
   ObservationDto,
   RisksDto,
   UpdateTestDto,
@@ -46,11 +49,17 @@ const testInclude = {
       photos: { select: { id: true, mimeType: true, fileName: true } },
     },
   },
+  dailyNotes: { orderBy: [{ date: 'desc' as const }] },
+  createdBy: { select: { id: true, name: true } },
+  watchers: { select: { user: { select: { id: true, name: true } } } },
 };
 
 @Injectable()
 export class StabilityService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   /** Reference lists for the frontend. */
   catalog() {
@@ -193,6 +202,10 @@ export class StabilityService {
     });
     if (!formula) throw new NotFoundException('Formule introuvable');
     const campaignId = randomUUID();
+    const watcherIds = await this.teamUserIds(
+      user.teamId,
+      (dto.watcherIds ?? []).filter((id) => id !== user.id),
+    );
     await this.prisma.stabilityTest.createMany({
       data: dto.conditions.map((c) => ({
         campaignId,
@@ -200,14 +213,25 @@ export class StabilityService {
         formulaId: dto.formulaId,
         condition: c.condition,
         conditionLabel: c.conditionLabel?.trim() || null,
-        base: dto.base,
+        base: dto.base ?? 'alcohol',
         container: dto.container?.trim() || null,
         startDate: new Date(dto.startDate),
+        deadline: dto.deadline ? new Date(dto.deadline) : null,
         checkpoints: [...new Set(c.checkpoints)].sort((a, b) => a - b),
         notes: dto.notes?.trim() || null,
         createdByName: user.name,
+        createdById: user.id,
       })),
     });
+    if (watcherIds.length) {
+      const tests = await this.prisma.stabilityTest.findMany({
+        where: { campaignId },
+        select: { id: true },
+      });
+      await this.prisma.stabilityWatcher.createMany({
+        data: tests.flatMap((t) => watcherIds.map((userId) => ({ testId: t.id, userId }))),
+      });
+    }
     return this.listTests(user.teamId, { formulaId: dto.formulaId });
   }
 
@@ -233,14 +257,90 @@ export class StabilityService {
         ...(dto.checkpoints !== undefined
           ? { checkpoints: [...new Set(dto.checkpoints)].sort((a, b) => a - b) }
           : {}),
+        ...(dto.deadline !== undefined
+          ? { deadline: dto.deadline ? new Date(dto.deadline) : null }
+          : {}),
       },
     });
     return this.getTest(teamId, id);
   }
 
+  // ── Daily notes ───────────────────────────────────────────────────────
+
+  async saveDailyNote(user: AuthUser, testId: string, dto: DailyNoteDto) {
+    await this.ensureTest(user.teamId, testId);
+    const date = new Date(dto.date.slice(0, 10));
+    const content = dto.content.trim();
+    if (!content) throw new BadRequestException('La note est vide.');
+    await this.prisma.stabilityDailyNote.upsert({
+      where: { testId_date: { testId, date } },
+      create: { testId, date, content, authorName: user.name },
+      update: { content, authorName: user.name },
+    });
+    return this.getTest(user.teamId, testId);
+  }
+
+  async deleteDailyNote(teamId: string, id: string) {
+    const note = await this.prisma.stabilityDailyNote.findFirst({
+      where: { id, test: { teamId } },
+      select: { testId: true },
+    });
+    if (!note) throw new NotFoundException('Note introuvable');
+    await this.prisma.stabilityDailyNote.delete({ where: { id } });
+    return this.getTest(teamId, note.testId);
+  }
+
+  /** Keeps only ids of members of the team (dedup). */
+  private async teamUserIds(teamId: string, ids: string[]) {
+    if (!ids.length) return [];
+    const users = await this.prisma.user.findMany({
+      where: { teamId, id: { in: [...new Set(ids)] } },
+      select: { id: true },
+    });
+    if (users.length !== new Set(ids).size) {
+      throw new BadRequestException("Certaines personnes ne font pas partie de l'équipe.");
+    }
+    return users.map((u) => u.id);
+  }
+
+  /** Same recipients on every test of the campaign. */
+  async setWatchers(teamId: string, id: string, dto: WatchersDto) {
+    const test = await this.prisma.stabilityTest.findFirst({
+      where: { id, teamId },
+      select: { campaignId: true, createdById: true },
+    });
+    if (!test) throw new NotFoundException('Test introuvable');
+    const userIds = await this.teamUserIds(
+      teamId,
+      dto.userIds.filter((u) => u !== test.createdById),
+    );
+    const tests = await this.prisma.stabilityTest.findMany({
+      where: { teamId, campaignId: test.campaignId },
+      select: { id: true },
+    });
+    const testIds = tests.map((t) => t.id);
+    await this.prisma.$transaction([
+      this.prisma.stabilityWatcher.deleteMany({ where: { testId: { in: testIds } } }),
+      this.prisma.stabilityWatcher.createMany({
+        data: testIds.flatMap((testId) => userIds.map((userId) => ({ testId, userId }))),
+      }),
+    ]);
+    return this.getTest(teamId, id);
+  }
+
   async deleteTest(teamId: string, id: string) {
     await this.ensureTest(teamId, id);
+    const keys = await this.photoKeys({ observation: { testId: id } });
     await this.prisma.stabilityTest.delete({ where: { id } });
+    await this.storage.remove(keys);
+  }
+
+  private async photoKeys(where: object) {
+    const photos = await this.prisma.stabilityPhoto.findMany({
+      where,
+      select: { storageKey: true },
+    });
+    return photos.map((p) => p.storageKey);
   }
 
   // ── Observations ──────────────────────────────────────────────────────
@@ -301,7 +401,9 @@ export class StabilityService {
 
   async deleteObservation(teamId: string, id: string) {
     const { testId } = await this.ensureObservation(teamId, id);
+    const keys = await this.photoKeys({ observationId: id });
     await this.prisma.stabilityObservation.delete({ where: { id } });
+    await this.storage.remove(keys);
     return this.getTest(teamId, testId);
   }
 
@@ -320,12 +422,17 @@ export class StabilityService {
       );
     }
     const { testId } = await this.ensureObservation(teamId, observationId);
+    const id = randomUUID();
+    const ext = file.mimetype.split('/')[1] ?? 'bin';
+    const storageKey = `teams/${teamId}/stability/${testId}/${id}.${ext}`;
+    await this.storage.put(storageKey, new Uint8Array(file.buffer), file.mimetype);
     await this.prisma.stabilityPhoto.create({
       data: {
+        id,
         observationId,
         mimeType: file.mimetype,
         fileName: file.originalname,
-        data: new Uint8Array(file.buffer),
+        storageKey,
       },
     });
     return this.getTest(teamId, testId);
@@ -339,13 +446,30 @@ export class StabilityService {
     return photo;
   }
 
+  /** Signed R2 URL, or null for a legacy photo still stored in the DB. */
+  async getPhotoUrl(teamId: string, id: string) {
+    const photo = await this.prisma.stabilityPhoto.findFirst({
+      where: { id, observation: { test: { teamId } } },
+      select: { storageKey: true },
+    });
+    if (!photo) throw new NotFoundException('Photo introuvable');
+    return {
+      url: photo.storageKey ? await this.storage.signedUrl(photo.storageKey) : null,
+    };
+  }
+
   async deletePhoto(teamId: string, id: string) {
     const photo = await this.prisma.stabilityPhoto.findFirst({
       where: { id, observation: { test: { teamId } } },
-      select: { id: true, observation: { select: { testId: true } } },
+      select: {
+        id: true,
+        storageKey: true,
+        observation: { select: { testId: true } },
+      },
     });
     if (!photo) throw new NotFoundException('Photo introuvable');
     await this.prisma.stabilityPhoto.delete({ where: { id } });
+    await this.storage.remove([photo.storageKey]);
     return this.getTest(teamId, photo.observation.testId);
   }
 

@@ -4,9 +4,11 @@ import {
   Delete,
   Get,
   HttpCode,
+  NotFoundException,
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   StreamableFile,
@@ -18,10 +20,13 @@ import type { Response } from 'express';
 import { CurrentUser, type AuthUser } from '../auth/auth-user.js';
 import {
   CreateCampaignDto,
+  DailyNoteDto,
   ObservationDto,
   RisksDto,
   UpdateTestDto,
+  WatchersDto,
 } from './dto/stability.dto.js';
+import { StabilityRemindersService } from './stability-reminders.service.js';
 import { MAX_PHOTO_BYTES, StabilityService } from './stability.service.js';
 
 interface UploadedPhoto {
@@ -32,7 +37,25 @@ interface UploadedPhoto {
 
 @Controller('stability')
 export class StabilityController {
-  constructor(private readonly stability: StabilityService) {}
+  constructor(
+    private readonly stability: StabilityService,
+    private readonly reminders: StabilityRemindersService,
+  ) {}
+
+  /** Sends my reminder email now, to check the setup and the content. */
+  @Post('reminders/preview')
+  previewReminder(@CurrentUser() user: AuthUser) {
+    return this.reminders.sendPreview(user.id);
+  }
+
+  @Put('tests/:id/watchers')
+  setWatchers(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: WatchersDto,
+  ) {
+    return this.stability.setWatchers(user.teamId, id, dto);
+  }
 
   @Get('catalog')
   catalog() {
@@ -81,6 +104,20 @@ export class StabilityController {
     return this.stability.deleteTest(user.teamId, id);
   }
 
+  @Put('tests/:id/daily-notes')
+  saveDailyNote(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: DailyNoteDto,
+  ) {
+    return this.stability.saveDailyNote(user, id, dto);
+  }
+
+  @Delete('daily-notes/:id')
+  deleteDailyNote(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.stability.deleteDailyNote(user.teamId, id);
+  }
+
   @Post('tests/:id/observations')
   addObservation(
     @CurrentUser() user: AuthUser,
@@ -116,6 +153,12 @@ export class StabilityController {
     return this.stability.addPhoto(user.teamId, id, file);
   }
 
+  @Get('photos/:id/url')
+  getPhotoUrl(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.stability.getPhotoUrl(user.teamId, id);
+  }
+
+  /** Legacy photos stored in the DB (before R2). */
   @Get('photos/:id')
   async getPhoto(
     @CurrentUser() user: AuthUser,
@@ -123,6 +166,7 @@ export class StabilityController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const photo = await this.stability.getPhoto(user.teamId, id);
+    if (!photo.data) throw new NotFoundException('Photo stockée sur R2');
     res.setHeader('Content-Type', photo.mimeType);
     res.setHeader('Cache-Control', 'private, max-age=86400');
     return new StreamableFile(Buffer.from(photo.data));

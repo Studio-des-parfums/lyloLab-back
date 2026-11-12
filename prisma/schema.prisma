@@ -13,17 +13,17 @@ model Team {
   inviteCode String   @unique @map("invite_code")
   createdAt  DateTime @default(now()) @map("created_at")
 
-  users     User[]
-  materials Material[]
-  clients   Client[]
-  projects  Project[]
-  formulas  Formula[]
-  regulations Regulation[]
-  stabilityTests StabilityTest[]
-  facetDefinitions FacetDefinition[]
+  users             User[]
+  materials         Material[]
+  clients           Client[]
+  projects          Project[]
+  formulas          Formula[]
+  regulations       Regulation[]
+  stabilityTests    StabilityTest[]
+  facetDefinitions  FacetDefinition[]
   referencePerfumes ReferencePerfume[]
-  materialNotes  MaterialNote[]
-  blindTests     BlindTest[]
+  materialNotes     MaterialNote[]
+  blindTests        BlindTest[]
 
   @@map("teams")
 }
@@ -38,8 +38,11 @@ model User {
   teamId       String   @map("team_id")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  team     Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  formulas Formula[]
+  team                  Team                 @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  formulas              Formula[]
+  createdStabilityTests StabilityTest[]      @relation("StabilityTestCreator")
+  stabilityWatches      StabilityWatcher[]
+  stabilityDigests      StabilityDigestLog[]
 
   @@index([teamId])
   @@map("users")
@@ -81,8 +84,8 @@ model Material {
   sourceFormulaId String?  @unique @map("source_formula_id")
   sourceFormula   Formula? @relation("FormulaAsMaterial", fields: [sourceFormulaId], references: [id], onDelete: SetNull)
 
-  formulaLines FormulaLine[]
-  stocks       MaterialStock[]
+  formulaLines      FormulaLine[]
+  stocks            MaterialStock[]
   regulationEntries RegulationEntry[]
   notes             MaterialNote[]
 
@@ -123,10 +126,10 @@ model Formula {
   projectId String?  @map("project_id")
   project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
-  lines           FormulaLine[]
-  stabilityTests  StabilityTest[]
-  references      ReferencePerfume[]
-  materializedAs  Material?     @relation("FormulaAsMaterial")
+  lines          FormulaLine[]
+  stabilityTests StabilityTest[]
+  references     ReferencePerfume[]
+  materializedAs Material?          @relation("FormulaAsMaterial")
 
   createdById   String? @map("created_by_id")
   createdBy     User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
@@ -137,18 +140,17 @@ model Formula {
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@index([teamId])
-
   @@map("formulas")
 }
 
 model Client {
-  id                String   @id @default(uuid())
-  company           String?
-  contactFirstName  String?  @map("contact_first_name")
-  contactLastName   String?  @map("contact_last_name")
-  contactEmail      String?  @map("contact_email")
-  contactPhone      String?  @map("contact_phone")
-  createdAt         DateTime @default(now()) @map("created_at")
+  id               String   @id @default(uuid())
+  company          String?
+  contactFirstName String?  @map("contact_first_name")
+  contactLastName  String?  @map("contact_last_name")
+  contactEmail     String?  @map("contact_email")
+  contactPhone     String?  @map("contact_phone")
+  createdAt        DateTime @default(now()) @map("created_at")
 
   projects Project[]
 
@@ -174,9 +176,8 @@ model Project {
   teamId String @map("team_id")
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
-  @@index([teamId])
-
   @@unique([clientId, name])
+  @@index([teamId])
   @@map("projects")
 }
 
@@ -213,9 +214,9 @@ model Regulation {
   substanceRule String?   @map("substance_rule")
   createdAt     DateTime  @default(now()) @map("created_at")
 
-  entries     RegulationEntry[]
-  substances  RegulatedSubstance[]
-  sources     RegulationSource[]
+  entries    RegulationEntry[]
+  substances RegulatedSubstance[]
+  sources    RegulationSource[]
 
   teamId String? @map("team_id")
   team   Team?   @relation(fields: [teamId], references: [id], onDelete: Cascade)
@@ -295,28 +296,35 @@ model RegulationSource {
 // A stability test of a formula under one storage condition (oven 40 °C,
 // light, fridge…), checked at scheduled days after its start.
 model StabilityTest {
-  id          String    @id @default(uuid())
+  id             String    @id @default(uuid())
   // Groups the tests launched together on a formula (one per condition).
-  campaignId  String    @map("campaign_id")
+  campaignId     String    @map("campaign_id")
   // Code of the condition (oven_40, light_uv…, see stability-conditions.ts) or "other".
-  condition   String
+  condition      String
   // Free label, used for "other" or to detail the condition.
-  conditionLabel String? @map("condition_label")
+  conditionLabel String?   @map("condition_label")
   // Product base tested: alcohol (fine fragrance), cream, soap, candle…
-  base        String    @default("alcohol")
-  container   String?
-  startDate   DateTime  @map("start_date")
+  base           String    @default("alcohol")
+  container      String?
+  startDate      DateTime  @map("start_date")
+  // Optional end of the test; the UI shows a countdown to it.
+  deadline       DateTime?
   // Days after the start when the sample is checked, e.g. [7, 14, 28, 56, 84].
-  checkpoints Json
+  checkpoints    Json
   // in_progress | completed | cancelled
-  status      String    @default("in_progress")
+  status         String    @default("in_progress")
   // conform | minor | non_conform, set when the test is completed.
-  conclusion  String?
-  notes       String?   @db.Text
-  createdByName String? @map("created_by_name")
-  createdAt   DateTime  @default(now()) @map("created_at")
+  conclusion     String?
+  notes          String?   @db.Text
+  createdByName  String?   @map("created_by_name")
+  // Always receives the checkpoint reminders.
+  createdById    String?   @map("created_by_id")
+  createdBy      User?     @relation("StabilityTestCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime  @default(now()) @map("created_at")
 
   observations StabilityObservation[]
+  dailyNotes   StabilityDailyNote[]
+  watchers     StabilityWatcher[]
 
   formulaId String  @map("formula_id")
   formula   Formula @relation(fields: [formulaId], references: [id], onDelete: Cascade)
@@ -332,22 +340,22 @@ model StabilityTest {
 
 // What was seen on a sample at a checkpoint (or at any time).
 model StabilityObservation {
-  id         String   @id @default(uuid())
+  id            String   @id @default(uuid())
   // Checkpoint day this observation answers (null for an extra check).
-  day        Int?
-  observedAt DateTime @map("observed_at")
+  day           Int?
+  observedAt    DateTime @map("observed_at")
   // conform | slight | altered
-  odor       String
-  color      String
+  odor          String
+  color         String
   // clear | hazy | deposit | separation
-  appearance String
-  ph         Float?
-  viscosity  Float?
+  appearance    String
+  ph            Float?
+  viscosity     Float?
   // mmol O2/L, compared with the official peroxide limits.
-  peroxideValue Float? @map("peroxide_value")
-  comment    String?  @db.Text
-  observerName String? @map("observer_name")
-  createdAt  DateTime @default(now()) @map("created_at")
+  peroxideValue Float?   @map("peroxide_value")
+  comment       String?  @db.Text
+  observerName  String?  @map("observer_name")
+  createdAt     DateTime @default(now()) @map("created_at")
 
   photos StabilityPhoto[]
 
@@ -358,12 +366,57 @@ model StabilityObservation {
   @@map("stability_observations")
 }
 
+// Extra team member who receives the checkpoint reminders of a test
+// (kept identical on every test of a campaign).
+model StabilityWatcher {
+  testId String        @map("test_id")
+  test   StabilityTest @relation(fields: [testId], references: [id], onDelete: Cascade)
+  userId String        @map("user_id")
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([testId, userId])
+  @@index([userId])
+  @@map("stability_watchers")
+}
+
+// One reminder email per user and day, so a restart never sends it twice.
+model StabilityDigestLog {
+  id     String   @id @default(uuid())
+  date   DateTime @db.Date
+  items  Int
+  sentAt DateTime @default(now()) @map("sent_at")
+  userId String   @map("user_id")
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("stability_digest_logs")
+}
+
+// Free daily follow-up on a test (one note per day, labelled J-n / J+n).
+model StabilityDailyNote {
+  id         String   @id @default(uuid())
+  date       DateTime @db.Date
+  content    String   @db.Text
+  authorName String?  @map("author_name")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  testId String        @map("test_id")
+  test   StabilityTest @relation(fields: [testId], references: [id], onDelete: Cascade)
+
+  @@unique([testId, date])
+  @@map("stability_daily_notes")
+}
+
 model StabilityPhoto {
-  id        String   @id @default(uuid())
-  mimeType  String   @map("mime_type")
-  fileName  String?  @map("file_name")
-  data      Bytes    @db.MediumBlob
-  createdAt DateTime @default(now()) @map("created_at")
+  id         String   @id @default(uuid())
+  mimeType   String   @map("mime_type")
+  fileName   String?  @map("file_name")
+  // Key of the file in the R2 bucket.
+  storageKey String?  @map("storage_key")
+  // Legacy: photos stored in the DB before R2 (null once migrated).
+  data       Bytes?   @db.MediumBlob
+  createdAt  DateTime @default(now()) @map("created_at")
 
   observationId String               @map("observation_id")
   observation   StabilityObservation @relation(fields: [observationId], references: [id], onDelete: Cascade)
@@ -424,18 +477,18 @@ model OlfactiveFamily {
 // A reference perfume (existing fragrance, brand, trend) and how it was
 // interpreted with the team's materials.
 model ReferencePerfume {
-  id          String   @id @default(uuid())
-  name        String
-  brand       String?
-  year        Int?
-  perfumer    String?
-  familyCode  String?  @map("family_code")
-  topNotes    Json     @map("top_notes")
-  heartNotes  Json     @map("heart_notes")
-  baseNotes   Json     @map("base_notes")
-  description String?  @db.Text
+  id             String   @id @default(uuid())
+  name           String
+  brand          String?
+  year           Int?
+  perfumer       String?
+  familyCode     String?  @map("family_code")
+  topNotes       Json     @map("top_notes")
+  heartNotes     Json     @map("heart_notes")
+  baseNotes      Json     @map("base_notes")
+  description    String?  @db.Text
   // [{ title, url }]
-  sources     Json
+  sources        Json
   // Closest catalog materials: [{ materialId, material, role }]
   interpretation Json
   createdByName  String?  @map("created_by_name")

@@ -25,9 +25,12 @@
     "seed:origins": "npx --yes tsx scripts/seed-origins.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1167.0",
+    "@aws-sdk/s3-request-presigner": "^3.1167.0",
     "@nestjs/common": "^12.0.1",
     "@nestjs/core": "^12.0.1",
     "@nestjs/platform-express": "^12.0.1",
+    "@nestjs/schedule": "^12.0.3",
     "@prisma/adapter-mariadb": "^7.10.1",
     "@prisma/client": "^7.10.1",
     "class-transformer": "^0.5.1",
@@ -37,6 +40,7 @@
     "mariadb": "^3.5.4",
     "openai": "^7.43.0",
     "reflect-metadata": "^0.2.2",
+    "resend": "^6.38.0",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {

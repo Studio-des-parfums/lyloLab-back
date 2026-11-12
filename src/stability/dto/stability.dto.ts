@@ -12,6 +12,8 @@ import {
   IsUUID,
   Max,
   Min,
+  MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { BASE_CODES, CONDITION_CODES } from '../stability-knowledge.js';
@@ -41,8 +43,9 @@ export class CreateCampaignDto {
   @IsUUID()
   formulaId!: string;
 
+  @IsOptional()
   @IsIn(BASE_CODES)
-  base!: string;
+  base?: string;
 
   @IsOptional()
   @IsString()
@@ -51,9 +54,21 @@ export class CreateCampaignDto {
   @IsDateString()
   startDate!: string;
 
+  /** Optional end of the test (countdown in the UI). */
+  @IsOptional()
+  @IsDateString()
+  deadline?: string;
+
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /** Team members who also receive the reminders (the creator always does). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsUUID('all', { each: true })
+  watcherIds?: string[];
 
   @IsArray()
   @ArrayMinSize(1)
@@ -85,6 +100,30 @@ export class UpdateTestDto {
   @IsInt({ each: true })
   @Min(0, { each: true })
   checkpoints?: number[];
+
+  /** ISO date, or null to remove the deadline. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsDateString()
+  deadline?: string | null;
+}
+
+/** Replaces the reminder recipients of a whole campaign. */
+export class WatchersDto {
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsUUID('all', { each: true })
+  userIds!: string[];
+}
+
+/** Daily follow-up note; one per test and day (upsert). */
+export class DailyNoteDto {
+  @IsDateString()
+  date!: string;
+
+  @IsString()
+  @MinLength(1)
+  content!: string;
 }
 
 export class ObservationDto {

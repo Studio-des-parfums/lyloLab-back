@@ -13,9 +13,11 @@ import { TeamsModule } from './teams/teams.module.js';
 import { RegulationsModule } from './regulations/regulations.module.js';
 import { StabilityModule } from './stability/stability.module.js';
 import { LibraryModule } from './library/library.module.js';
+import { ScheduleModule } from '@nestjs/schedule';
+import { MailModule } from './mail/mail.module.js';
 
 @Module({
-  imports: [PrismaModule, MaterialsModule, FormulasModule, ClientsModule, ProjectsModule, AiModule, DashboardModule, AuthModule, TeamsModule, RegulationsModule, StabilityModule, LibraryModule],
+  imports: [ScheduleModule.forRoot(), MailModule, PrismaModule, MaterialsModule, FormulasModule, ClientsModule, ProjectsModule, AiModule, DashboardModule, AuthModule, TeamsModule, RegulationsModule, StabilityModule, LibraryModule],
   controllers: [AppController],
   providers: [AppService],
 })
