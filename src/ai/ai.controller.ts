@@ -1,4 +1,13 @@
-import { Body, Controller, Post, Res } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Post,
+  Res,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { CurrentUser, type AuthUser } from '../auth/auth-user.js';
 import { AiService } from './ai.service.js';
@@ -11,6 +20,22 @@ export class AiController {
   @Post('chat')
   chat(@CurrentUser() user: AuthUser, @Body() dto: ChatDto) {
     return this.aiService.chat(user.teamId, dto);
+  }
+
+  /** Voice input: transcribes an audio recording (multipart field "audio"). */
+  @Post('transcribe')
+  @UseInterceptors(
+    // OpenAI rejects files over 25 MB.
+    FileInterceptor('audio', { limits: { fileSize: 25 * 1024 * 1024 } }),
+  )
+  transcribe(
+    @CurrentUser() user: AuthUser,
+    @UploadedFile() file: { buffer: Buffer; mimetype: string } | undefined,
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Aucun enregistrement audio reçu.');
+    }
+    return this.aiService.transcribe(user.teamId, file.buffer, file.mimetype);
   }
 
   /** Server-Sent Events: "delta" chunks of the message, then "done" (or "error"). */

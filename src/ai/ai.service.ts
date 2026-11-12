@@ -4,7 +4,7 @@ import {
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import type { ReasoningEffort } from 'openai/resources/shared';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { parseIfraLimitPercent } from '../formulas/ifra-limit.js';
@@ -335,6 +335,49 @@ export class AiService {
     if (materials.length === 0)
       return 'Aucune matière trouvée pour ces critères.';
     return materials.map(describeMaterial).join('\n');
+  }
+
+  /**
+   * Speech-to-text for the assistant's voice input. The team's material names
+   * are given as a prompt so the model spells the perfumery jargon right.
+   */
+  async transcribe(
+    teamId: string,
+    audio: Buffer,
+    mimetype: string,
+  ): Promise<{ text: string }> {
+    const client = this.getClient();
+    const materials = await this.prisma.material.findMany({
+      where: { teamId },
+      select: { name: true },
+      orderBy: { name: 'asc' },
+    });
+    const vocabulary = materials
+      .map((m) => m.name)
+      .join(', ')
+      .slice(0, 800);
+    const extension = mimetype.includes('mp4')
+      ? 'mp4'
+      : mimetype.includes('ogg')
+        ? 'ogg'
+        : mimetype.includes('wav')
+          ? 'wav'
+          : 'webm';
+
+    try {
+      const result = await client.audio.transcriptions.create({
+        file: await toFile(audio, `voice.${extension}`, { type: mimetype }),
+        model: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-transcribe',
+        language: 'fr',
+        prompt:
+          'Échange avec un assistant de formulation de parfum (facettes, ' +
+          'notes de tête, de cœur, de fond, IFRA, dosages en pourcentage). ' +
+          `Matières premières : ${vocabulary}`,
+      });
+      return { text: result.text.trim() };
+    } catch (err) {
+      throw this.requestError(err);
+    }
   }
 
   private requestError(err: unknown): BadGatewayException {
