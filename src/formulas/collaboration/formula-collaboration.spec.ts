@@ -18,6 +18,10 @@ function setup(formula: { id: string; rootFormulaId: string | null } | null = { 
       findFirst: vi.fn(async () => (formula ? { ...formula, name: 'Soleil', version: 2 } : null)),
       updateMany: vi.fn(async () => ({ count: 2 })),
       update: vi.fn(async () => ({})),
+      findUniqueOrThrow: vi.fn(async () => ({
+        name: 'Soleil', code: 'SOL', version: 2, description: 'Un floral solaire',
+        project: { name: 'Été', client: { company: 'Maison X', contactFirstName: null, contactLastName: null } },
+      })),
     },
     formulaNote: {
       findFirst: vi.fn(async () => ({ id: 'n1', authorId: 'u2' })),
@@ -33,7 +37,7 @@ function setup(formula: { id: string; rootFormulaId: string | null } | null = { 
     },
     user: {
       findMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) =>
-        where.id.in.filter((id) => id !== 'outsider').map((id) => ({ id })),
+        where.id.in.filter((id) => id !== 'outsider').map((id) => ({ id, name: `User ${id}`, email: `${id}@x.fr` })),
       ),
     },
     $transaction: vi.fn(async (arg: unknown) =>
@@ -41,16 +45,19 @@ function setup(formula: { id: string; rootFormulaId: string | null } | null = { 
     ),
   };
   const webhooks = { notify: vi.fn() };
-  return { service: new FormulaCollaborationService(prisma as never, webhooks as never), prisma, tx, webhooks };
+  const requesterMail = { notify: vi.fn() };
+  const mail = { configured: true, send: vi.fn(async (_m: { to: string; subject: string; text: string }) => {}) };
+  return { service: new FormulaCollaborationService(prisma as never, webhooks as never, mail as never, requesterMail as never), prisma, tx, webhooks, mail, requesterMail };
 }
 
 describe('FormulaCollaborationService', () => {
   it('completes the linked in-progress request and notifies its platform when a version is marked final', async () => {
-    const { service, tx, webhooks } = setup();
+    const { service, tx, webhooks, requesterMail } = setup();
     await service.markFinal(user, 'v2');
     expect(tx.formulationRequest.findFirst.mock.calls[0][0].where).toEqual({ teamId: 't1', formulaId: 'v1', status: 'in_progress' });
     expect(tx.formulationRequest.updateMany.mock.calls[0][0].data).toMatchObject({ status: 'completed', completedById: 'u1' });
     expect(webhooks.notify).toHaveBeenCalledWith('k1', 'formulation_request.completed', expect.objectContaining({ id: 'r1' }));
+    expect(requesterMail.notify).toHaveBeenCalledWith('completed', expect.objectContaining({ id: 'r1' }));
   });
 
   it('sends no webhook when the formula has no in-progress request', async () => {
@@ -82,9 +89,28 @@ describe('FormulaCollaborationService', () => {
   });
 
   it('creates no notification without mentions', async () => {
-    const { service, tx } = setup();
+    const { service, tx, mail } = setup();
     await service.postMessage(user, 'v2', 'Juste une remarque');
     expect(tx.notification.createMany).not.toHaveBeenCalled();
+    expect(mail.send).not.toHaveBeenCalled();
+  });
+
+  it('emails every mentioned member with the formula, the author and the message', async () => {
+    const { service, mail } = setup();
+    await service.postMessage(user, 'v2', '@Castor @Pollux avis ?', ['u2', 'u3']);
+    await vi.waitFor(() => expect(mail.send).toHaveBeenCalledTimes(2));
+    const sent = mail.send.mock.calls.map((c) => c[0]);
+    expect(sent.map((m) => m.to)).toEqual(['u2@x.fr', 'u3@x.fr']);
+    expect(sent[0].subject).toBe('Dwain vous a mentionné sur Soleil');
+    expect(sent[0].text).toContain('> @Castor @Pollux avis ?');
+    expect(sent[0].text).toContain('Soleil (SOL) · v2');
+    expect(sent[0].text).toContain('Client : Maison X');
+  });
+
+  it('still posts the message when an email fails', async () => {
+    const { service, mail } = setup();
+    mail.send.mockRejectedValue(new Error('down'));
+    await expect(service.postMessage(user, 'v2', '@Castor', ['u2'])).resolves.toMatchObject({ id: 'm1' });
   });
 
   it("refuses to delete someone else's note unless admin", async () => {

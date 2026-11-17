@@ -46,7 +46,7 @@ describe('FormulationRequestsService (API)', () => {
         ...overrides,
       },
     };
-    return { service: new FormulationRequestsService(prisma as never, { notify: vi.fn() } as never), prisma };
+    return { service: new FormulationRequestsService(prisma as never, { notify: vi.fn() } as never, { notify: vi.fn() } as never), prisma };
   }
 
   it('drops client fields when the request is not for a client', async () => {
@@ -96,7 +96,7 @@ describe('FormulationRequestsService.take', () => {
       formulationRequest: { findFirst: vi.fn(async () => request) },
       $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
     };
-    return { service: new FormulationRequestsService(prisma as never, { notify: vi.fn() } as never), tx };
+    return { service: new FormulationRequestsService(prisma as never, { notify: vi.fn() } as never, { notify: vi.fn() } as never), tx };
   }
 
   it('creates client, project and draft formula, and assigns the user', async () => {
@@ -145,7 +145,7 @@ describe('FormulationRequestsService.start', () => {
     const prisma = {
       formulationRequest: { findFirst: vi.fn(async () => request), update: vi.fn(async () => ({})) },
     };
-    return { service: new FormulationRequestsService(prisma as never, { notify: vi.fn() } as never), prisma };
+    return { service: new FormulationRequestsService(prisma as never, { notify: vi.fn() } as never, { notify: vi.fn() } as never), prisma };
   };
 
   it('marks the request as started for its assignee', async () => {
