@@ -42,11 +42,11 @@ export class RateLimiter {
 /** Protège /api/v1 : à combiner avec @Public() pour court-circuiter l'AuthGuard utilisateur. */
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
-  private readonly limiter: RateLimiter;
+  // Partagé : le guard est instancié dans chaque module qui l'utilise, la limite doit rester globale par clé.
+  private static readonly limiter = new RateLimiter();
+  private readonly limiter = ApiKeyGuard.limiter;
 
-  constructor(private readonly prisma: PrismaService, limiter?: RateLimiter) {
-    this.limiter = limiter ?? new RateLimiter();
-  }
+  constructor(private readonly prisma: PrismaService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context
