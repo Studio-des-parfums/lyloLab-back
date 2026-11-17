@@ -26,6 +26,7 @@ export class ProjectsService {
           include: {
             materializedAs: { select: { id: true } },
             createdBy: { select: { id: true, name: true } },
+            _count: { select: { notes: true } },
           },
         },
       },
@@ -51,8 +52,6 @@ export class ProjectsService {
           name: dto.name,
           clientId: dto.clientId,
           description: dto.description,
-          startDate: dto.startDate ? new Date(dto.startDate) : undefined,
-          endDate: dto.endDate ? new Date(dto.endDate) : undefined,
         },
         include: { client: true },
       });
@@ -77,12 +76,6 @@ export class ProjectsService {
         data: {
           ...(dto.name !== undefined ? { name: dto.name } : {}),
           ...(dto.description !== undefined ? { description: dto.description } : {}),
-          ...(dto.startDate !== undefined
-            ? { startDate: dto.startDate ? new Date(dto.startDate) : null }
-            : {}),
-          ...(dto.endDate !== undefined
-            ? { endDate: dto.endDate ? new Date(dto.endDate) : null }
-            : {}),
         },
         include: { client: true },
       });

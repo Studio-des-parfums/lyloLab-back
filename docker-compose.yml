@@ -1,0 +1,18 @@
+# Base MySQL locale pour le développement (copie de la base Railway).
+name: bdd-lylolab
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: bdd-lylolab
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: lylo
+      MYSQL_DATABASE: lylo_lab
+      MYSQL_USER: lylo
+      MYSQL_PASSWORD: lylo
+    ports:
+      - "3308:3306"
+    volumes:
+      - bdd-lylolab-data:/var/lib/mysql
+volumes:
+  bdd-lylolab-data:

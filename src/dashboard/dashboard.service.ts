@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { parseIfraLimitPercent } from '../formulas/ifra-limit.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-// Projects ending within this many days show up in the deadlines block.
+// Formulas ending within this many days show up in the deadlines block.
 const DEADLINE_HORIZON_DAYS = 30;
 // Most lab bottles hold a few grams (median ≈ 7 g), so "low" is under 10 g.
 const LOW_STOCK_GRAMS = 10;
@@ -86,7 +86,7 @@ export class DashboardService {
       }),
       this.prisma.project.findMany({
         where: { teamId },
-        include: { client: true, formulas: { select: { status: true } } },
+        select: { id: true, formulas: { select: { status: true, finalVersionId: true } } },
       }),
       this.prisma.client.count({ where: { teamId } }),
       this.prisma.material.findMany({
@@ -112,31 +112,38 @@ export class DashboardService {
       draftFormulas: formulas.filter((f) => f.status === 'draft').length,
       completedFormulas: formulas.filter((f) => f.status === 'completed').length,
       formulasThisMonth: formulas.filter((f) => f.createdAt >= startOfMonth).length,
-      activeProjects: projects.filter(
-        (p) =>
-          (!p.startDate || p.startDate <= now) && (!p.endDate || p.endDate >= startOfToday),
-      ).length,
+      // Un projet est actif tant qu'une de ses formules n'a pas de version finale.
+      activeProjects: projects.filter((p) => p.formulas.some((f) => !f.finalVersionId)).length,
       clients: clientCount,
       materials: materials.length,
       outOfStockMaterials: [...stockById.values()].filter((s) => s.level === 'out').length,
     };
 
-    // 2. Deadlines: due within the horizon, or overdue with no finalized formula yet.
-    const deadlines = projects
-      .filter((p) => p.endDate && p.endDate <= horizon)
-      .map((p) => {
-        const completedCount = p.formulas.filter((f) => f.status === 'completed').length;
-        return {
-          projectId: p.id,
-          projectName: p.name,
-          clientName: clientDisplayName(p.client),
-          endDate: p.endDate!.toISOString(),
-          daysLeft: Math.round((p.endDate!.getTime() - startOfToday.getTime()) / DAY_MS),
-          draftCount: p.formulas.length - completedCount,
-          completedCount,
-        };
+    // 2. Deadlines: one per formula (all versions share the dates), due within the horizon,
+    // or overdue without a final version yet.
+    const lineages = new Map<string, typeof formulas>();
+    for (const f of formulas) {
+      const root = f.rootFormulaId ?? f.id;
+      lineages.set(root, [...(lineages.get(root) ?? []), f]);
+    }
+    const deadlines = [...lineages.values()]
+      .map((versions) => {
+        const latest = versions.reduce((a, b) => (b.version > a.version ? b : a));
+        return { latest, versions };
       })
-      .filter((p) => p.daysLeft >= 0 || p.completedCount === 0)
+      .filter(({ latest }) => latest.endDate && latest.endDate <= horizon)
+      .map(({ latest, versions }) => ({
+        formulaId: latest.id,
+        formulaName: latest.name,
+        projectId: latest.projectId,
+        projectName: latest.project?.name ?? null,
+        clientName: latest.project ? clientDisplayName(latest.project.client) : null,
+        endDate: latest.endDate!.toISOString(),
+        daysLeft: Math.round((latest.endDate!.getTime() - startOfToday.getTime()) / DAY_MS),
+        versionCount: versions.length,
+        hasFinal: !!latest.finalVersionId,
+      }))
+      .filter((d) => d.daysLeft >= 0 || !d.hasFinal)
       .sort((a, b) => a.daysLeft - b.daysLeft);
 
     // 3. Latest drafts (by creation date: formulas carry no modification date).

@@ -13,17 +13,19 @@ model Team {
   inviteCode String   @unique @map("invite_code")
   createdAt  DateTime @default(now()) @map("created_at")
 
-  users             User[]
-  materials         Material[]
-  clients           Client[]
-  projects          Project[]
-  formulas          Formula[]
-  regulations       Regulation[]
-  stabilityTests    StabilityTest[]
-  facetDefinitions  FacetDefinition[]
-  referencePerfumes ReferencePerfume[]
-  materialNotes     MaterialNote[]
-  blindTests        BlindTest[]
+  users               User[]
+  materials           Material[]
+  clients             Client[]
+  projects            Project[]
+  formulas            Formula[]
+  regulations         Regulation[]
+  stabilityTests      StabilityTest[]
+  facetDefinitions    FacetDefinition[]
+  referencePerfumes   ReferencePerfume[]
+  materialNotes       MaterialNote[]
+  blindTests          BlindTest[]
+  apiKeys             ApiKey[]
+  formulationRequests FormulationRequest[]
 
   @@map("teams")
 }
@@ -43,6 +45,11 @@ model User {
   createdStabilityTests StabilityTest[]      @relation("StabilityTestCreator")
   stabilityWatches      StabilityWatcher[]
   stabilityDigests      StabilityDigestLog[]
+  assignedRequests      FormulationRequest[] @relation("RequestAssignee")
+  completedRequests     FormulationRequest[] @relation("RequestCompleter")
+  formulaNotes          FormulaNote[]
+  formulaMessages       FormulaMessage[]
+  notifications         Notification[]
 
   @@index([teamId])
   @@map("users")
@@ -116,6 +123,7 @@ model MaterialStock {
 model Formula {
   id            String   @id @default(uuid())
   name          String
+  description   String?  @db.Text
   facets        Json?
   adjustments   Json?
   totalVolumeMl Float?   @map("total_volume_ml")
@@ -136,10 +144,29 @@ model Formula {
   // Kept so the author still shows once their account is removed from the team.
   createdByName String? @map("created_by_name")
 
+  // Versions : la v1 est la racine (rootFormulaId null), les suivantes pointent vers elle.
+  version       Int       @default(1)
+  // Identifiant lisible : XXX-XXX-n, et -n-m pour une branche repartie d'une version déjà suivie.
+  code          String?
+  // Période de travail de la formule (commune à toutes les versions, comme le résultat visé).
+  startDate      DateTime? @map("start_date")
+  endDate        DateTime? @map("end_date")
+  // Version retenue comme finale pour toute la lignée (copiée sur chaque version, comme la description).
+  finalVersionId String?  @map("final_version_id")
+  rootFormulaId String?   @map("root_formula_id")
+  root          Formula?  @relation("FormulaVersions", fields: [rootFormulaId], references: [id], onDelete: SetNull)
+  versions      Formula[] @relation("FormulaVersions")
+
+  notes         FormulaNote[]
+  messages      FormulaMessage[]
+  notifications Notification[]
+
   teamId String @map("team_id")
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@index([teamId])
+  @@index([rootFormulaId])
+  @@unique([teamId, code])
   @@map("formulas")
 }
 
@@ -166,8 +193,6 @@ model Project {
   name        String
   clientId    String    @map("client_id")
   description String?   @db.Text
-  startDate   DateTime? @map("start_date")
-  endDate     DateTime? @map("end_date")
   createdAt   DateTime  @default(now()) @map("created_at")
 
   client   Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -553,4 +578,145 @@ model Country {
   kind       String  @default("country")
 
   @@map("countries")
+}
+
+// Clé donnée à une plateforme externe pour appeler /api/v1. Seul le hash est stocké.
+model ApiKey {
+  id            String    @id @default(uuid())
+  name          String
+  keyHash       String    @unique @map("key_hash")
+  prefix        String
+  webhookUrl    String?   @map("webhook_url") @db.Text
+  webhookSecret String    @map("webhook_secret")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  revokedAt     DateTime? @map("revoked_at")
+
+  requests FormulationRequest[]
+
+  teamId String @map("team_id")
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@map("api_keys")
+}
+
+// Demande de création de parfum reçue d'une plateforme externe.
+model FormulationRequest {
+  id             String  @id @default(uuid())
+  externalRef    String? @map("external_ref")
+  requesterName  String  @map("requester_name")
+  requesterEmail String  @map("requester_email")
+  perfumeName    String? @map("perfume_name")
+  description    String  @db.Text
+
+  forClient       Boolean @default(false) @map("for_client")
+  clientCompany   String? @map("client_company")
+  clientFirstName String? @map("client_first_name")
+  clientLastName  String? @map("client_last_name")
+  clientEmail     String? @map("client_email")
+  clientPhone     String? @map("client_phone")
+  projectName     String? @map("project_name")
+
+  // pending | in_progress | completed | cancelled
+  status String @default("pending")
+
+  assignedToId  String?   @map("assigned_to_id")
+  assignedTo    User?     @relation("RequestAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedAt    DateTime? @map("assigned_at")
+  // Le parfumeur a commencé la formule (sinon elle reste « à réaliser »).
+  startedAt     DateTime? @map("started_at")
+  completedById String?   @map("completed_by_id")
+  completedBy   User?     @relation("RequestCompleter", fields: [completedById], references: [id], onDelete: SetNull)
+  completedAt   DateTime? @map("completed_at")
+
+  clientId  String? @map("client_id")
+  projectId String? @map("project_id")
+  formulaId String? @unique @map("formula_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  deliveries WebhookDelivery[]
+
+  apiKeyId String? @map("api_key_id")
+  apiKey   ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  teamId   String  @map("team_id")
+  team     Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, status])
+  @@map("formulation_requests")
+}
+
+// Trace de chaque envoi de webhook, pour les relances et le diagnostic.
+model WebhookDelivery {
+  id            String    @id @default(uuid())
+  event         String
+  payload       Json
+  // pending | delivered | failed
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error") @db.Text
+  nextAttemptAt DateTime? @map("next_attempt_at")
+  deliveredAt   DateTime? @map("delivered_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  requestId String             @map("request_id")
+  request   FormulationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@map("webhook_deliveries")
+}
+
+// Note libre sur une version précise d'une formule.
+model FormulaNote {
+  id         String   @id @default(uuid())
+  body       String   @db.Text
+  authorName String   @map("author_name")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  authorId  String?  @map("author_id")
+  author    User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  formulaId String   @map("formula_id")
+  formula   Formula  @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+
+  @@index([formulaId])
+  @@map("formula_notes")
+}
+
+// Discussion d'équipe : un fil par formule (toutes versions), rattaché à la racine de la lignée.
+model FormulaMessage {
+  id         String   @id @default(uuid())
+  body       String   @db.Text
+  // Ids des membres mentionnés (@Nom).
+  mentions   Json
+  authorName String   @map("author_name")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  authorId      String?  @map("author_id")
+  author        User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  rootFormulaId String   @map("root_formula_id")
+  rootFormula   Formula  @relation(fields: [rootFormulaId], references: [id], onDelete: Cascade)
+  teamId        String   @map("team_id")
+
+  @@index([rootFormulaId, createdAt])
+  @@map("formula_messages")
+}
+
+// Notification dans l'app (cloche) : pour l'instant les mentions dans les discussions.
+model Notification {
+  id        String    @id @default(uuid())
+  // mention
+  type      String
+  actorName String    @map("actor_name")
+  excerpt   String    @db.Text
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  formulaId String?  @map("formula_id")
+  formula   Formula? @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@map("notifications")
 }

@@ -1,15 +1,5 @@
 import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsIn,
-  IsNumber,
-  IsObject,
-  IsOptional,
-  IsString,
-  Min,
-  MinLength,
-  ValidateNested,
-} from 'class-validator';
+import { IsArray, IsIn, IsNumber, IsObject, IsOptional, IsString, Min, MinLength, ValidateNested, MaxLength } from 'class-validator';
 
 export class CreateFormulaLineDto {
   @IsString()
@@ -24,6 +14,11 @@ export class CreateFormulaDto {
   @IsString()
   @MinLength(1)
   name!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  description?: string | null;
 
   @IsObject()
   facets!: Record<string, number>;
@@ -48,4 +43,9 @@ export class CreateFormulaDto {
   @IsOptional()
   @IsString()
   projectId?: string | null;
+
+  /** Crée une nouvelle version de cette formule (ignoré à la mise à jour). */
+  @IsOptional()
+  @IsString()
+  versionOfId?: string;
 }

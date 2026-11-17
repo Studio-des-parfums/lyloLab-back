@@ -15,9 +15,12 @@ import { StabilityModule } from './stability/stability.module.js';
 import { LibraryModule } from './library/library.module.js';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MailModule } from './mail/mail.module.js';
+import { ApiKeysModule } from './api-keys/api-keys.module.js';
+import { NotificationsModule } from './notifications/notifications.module.js';
+import { FormulationRequestsModule } from './formulation-requests/formulation-requests.module.js';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), MailModule, PrismaModule, MaterialsModule, FormulasModule, ClientsModule, ProjectsModule, AiModule, DashboardModule, AuthModule, TeamsModule, RegulationsModule, StabilityModule, LibraryModule],
+  imports: [ScheduleModule.forRoot(), MailModule, PrismaModule, MaterialsModule, FormulasModule, ClientsModule, ProjectsModule, AiModule, DashboardModule, AuthModule, TeamsModule, RegulationsModule, StabilityModule, LibraryModule, ApiKeysModule, FormulationRequestsModule, NotificationsModule],
   controllers: [AppController],
   providers: [AppService],
 })

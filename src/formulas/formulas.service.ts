@@ -11,6 +11,7 @@ import type { CreateFormulaDto } from './dto/create-formula.dto.js';
 import type { UpdateFormulaStatusDto } from './dto/update-formula-status.dto.js';
 import type { AuthUser } from '../auth/auth-user.js';
 import { parseIfraLimitPercent } from './ifra-limit.js';
+import { nextFormulaCode, randomFormulaPrefix } from './formula-code.js';
 
 interface MaterialRegulatory {
   ifraLimit?: string | number;
@@ -69,6 +70,7 @@ export class FormulasService {
       include: {
         materializedAs: { select: { id: true } },
         project: { include: { client: true } },
+        _count: { select: { notes: true } },
         ...AUTHOR_SELECT,
       },
     });
@@ -110,31 +112,95 @@ export class FormulasService {
   async create(user: AuthUser, dto: CreateFormulaDto) {
     const teamId = user.teamId;
     await this.assertReferences(teamId, dto);
-    return this.prisma.formula.create({
-      data: {
-        teamId,
-        createdById: user.id,
-        createdByName: user.name,
-        name: dto.name,
-        facets: dto.facets,
-        adjustments: dto.adjustments,
-        totalVolumeMl: dto.totalVolumeMl ?? null,
-        source: 'user',
-        status: dto.status ?? 'draft',
-        projectId: dto.projectId ?? null,
-        lines: {
-          create: dto.lines.map((line) => ({
-            materialId: line.materialId,
-            quantity: line.quantity,
-          })),
+
+    return this.prisma.$transaction(async (tx) => {
+      let rootFormulaId: string | null = null;
+      let version = 1;
+      let projectId = dto.projectId ?? null;
+      let description = dto.description?.trim() || null;
+      let finalVersionId: string | null = null;
+      let startDate: Date | null = null;
+      let endDate: Date | null = null;
+      let code: string;
+
+      if (!dto.versionOfId) {
+        code = `${await this.uniquePrefix(tx, teamId)}-1`;
+      } else {
+        const source = await tx.formula.findFirst({
+          where: { id: dto.versionOfId, teamId },
+          select: { id: true, rootFormulaId: true, projectId: true },
+        });
+        if (!source) throw new NotFoundException(`Formula "${dto.versionOfId}" not found`);
+        const sourceCode = (await tx.formula.findFirst({ where: { id: source.id }, select: { code: true } }))?.code;
+        rootFormulaId = source.rootFormulaId ?? source.id;
+        const latest = await tx.formula.aggregate({
+          where: { OR: [{ id: rootFormulaId }, { rootFormulaId }] },
+          _max: { version: true },
+        });
+        version = (latest._max.version ?? 1) + 1;
+        const lineageCodes = await tx.formula.findMany({
+          where: { OR: [{ id: rootFormulaId }, { rootFormulaId }] },
+          select: { code: true },
+        });
+        const existing = new Set(lineageCodes.map((f) => f.code).filter((c): c is string => !!c));
+        code = sourceCode
+          ? nextFormulaCode(sourceCode, existing)
+          : `${await this.uniquePrefix(tx, teamId)}-${version}`;
+        if (dto.projectId === undefined) projectId = source.projectId;
+        // La description (résultat visé) est commune à toute la lignée.
+        const root = await tx.formula.findFirst({
+          where: { id: rootFormulaId },
+          select: { description: true, finalVersionId: true, startDate: true, endDate: true },
+        });
+        description = root?.description ?? description;
+        finalVersionId = root?.finalVersionId ?? null;
+        startDate = root?.startDate ?? null;
+        endDate = root?.endDate ?? null;
+      }
+
+      return tx.formula.create({
+        data: {
+          teamId,
+          createdById: user.id,
+          createdByName: user.name,
+          name: dto.name,
+          description,
+          finalVersionId,
+          startDate,
+          endDate,
+          code,
+          facets: dto.facets,
+          adjustments: dto.adjustments,
+          totalVolumeMl: dto.totalVolumeMl ?? null,
+          source: 'user',
+          status: dto.status ?? 'draft',
+          projectId,
+          rootFormulaId,
+          version,
+          lines: {
+            create: dto.lines.map((line) => ({
+              materialId: line.materialId,
+              quantity: line.quantity,
+            })),
+          },
         },
-      },
-      include: {
-        lines: { include: { material: true } },
-        project: { include: { client: true } },
-        ...AUTHOR_SELECT,
-      },
+        include: {
+          lines: { include: { material: true } },
+          project: { include: { client: true } },
+          ...AUTHOR_SELECT,
+        },
+      });
     });
+  }
+
+  /** Préfixe XXX-XXX encore libre dans l'équipe. */
+  private async uniquePrefix(tx: Prisma.TransactionClient, teamId: string): Promise<string> {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const prefix = randomFormulaPrefix();
+      const taken = await tx.formula.count({ where: { teamId, code: { startsWith: `${prefix}-` } } });
+      if (taken === 0) return prefix;
+    }
+    throw new ConflictException("Impossible de générer un identifiant de formule, réessayez.");
   }
 
   async update(teamId: string, id: string, dto: CreateFormulaDto) {
@@ -179,8 +245,34 @@ export class FormulasService {
   }
 
   async remove(teamId: string, id: string) {
-    await this.findOne(teamId, id);
-    await this.prisma.formula.delete({ where: { id } });
+    const formula = await this.findOne(teamId, id);
+    await this.prisma.$transaction(async (tx) => {
+      // Supprimer la v1 ne doit pas casser la lignée : la plus ancienne version restante devient la racine.
+      if (!formula.rootFormulaId) {
+        const children = await tx.formula.findMany({
+          where: { rootFormulaId: id },
+          orderBy: { version: 'asc' },
+          select: { id: true },
+        });
+        if (children.length > 0) {
+          const [newRoot, ...others] = children;
+          await tx.formula.update({ where: { id: newRoot.id }, data: { rootFormulaId: null } });
+          // Une demande de formulation liée à la v1 suit la nouvelle racine.
+          await tx.formulationRequest.updateMany({ where: { formulaId: id }, data: { formulaId: newRoot.id } });
+          // La discussion d'équipe est rattachée à la racine : elle suit aussi.
+          await tx.formulaMessage.updateMany({ where: { rootFormulaId: id }, data: { rootFormulaId: newRoot.id } });
+          if (others.length > 0) {
+            await tx.formula.updateMany({
+              where: { id: { in: others.map((c) => c.id) } },
+              data: { rootFormulaId: newRoot.id },
+            });
+          }
+        }
+      }
+      // Si c'était la version finale, la lignée n'en a plus.
+      await tx.formula.updateMany({ where: { finalVersionId: id }, data: { finalVersionId: null } });
+      await tx.formula.delete({ where: { id } });
+    });
   }
 
   async convertToMaterial(teamId: string, id: string) {
