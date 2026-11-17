@@ -217,6 +217,7 @@ export class FormulationRequestsService {
         data: {
           teamId: user.teamId,
           name: request.perfumeName || request.projectName || 'Formule sur demande',
+          description: request.description,
           status: 'draft',
           source: 'request',
           projectId,

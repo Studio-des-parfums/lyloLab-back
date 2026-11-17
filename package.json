@@ -22,6 +22,7 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "seed:regulations": "npx --yes tsx scripts/seed-regulations.ts",
     "seed:library": "npx --yes tsx scripts/seed-library.ts",
+    "backfill:formula-codes": "npx --yes tsx scripts/backfill-formula-codes.ts",
     "seed:origins": "npx --yes tsx scripts/seed-origins.ts"
   },
   "dependencies": {

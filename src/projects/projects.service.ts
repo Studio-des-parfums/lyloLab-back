@@ -26,6 +26,7 @@ export class ProjectsService {
           include: {
             materializedAs: { select: { id: true } },
             createdBy: { select: { id: true, name: true } },
+            _count: { select: { notes: true } },
           },
         },
       },
