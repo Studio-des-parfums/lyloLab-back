@@ -13,17 +13,19 @@ model Team {
   inviteCode String   @unique @map("invite_code")
   createdAt  DateTime @default(now()) @map("created_at")
 
-  users             User[]
-  materials         Material[]
-  clients           Client[]
-  projects          Project[]
-  formulas          Formula[]
-  regulations       Regulation[]
-  stabilityTests    StabilityTest[]
-  facetDefinitions  FacetDefinition[]
-  referencePerfumes ReferencePerfume[]
-  materialNotes     MaterialNote[]
-  blindTests        BlindTest[]
+  users               User[]
+  materials           Material[]
+  clients             Client[]
+  projects            Project[]
+  formulas            Formula[]
+  regulations         Regulation[]
+  stabilityTests      StabilityTest[]
+  facetDefinitions    FacetDefinition[]
+  referencePerfumes   ReferencePerfume[]
+  materialNotes       MaterialNote[]
+  blindTests          BlindTest[]
+  apiKeys             ApiKey[]
+  formulationRequests FormulationRequest[]
 
   @@map("teams")
 }
@@ -43,6 +45,8 @@ model User {
   createdStabilityTests StabilityTest[]      @relation("StabilityTestCreator")
   stabilityWatches      StabilityWatcher[]
   stabilityDigests      StabilityDigestLog[]
+  assignedRequests      FormulationRequest[] @relation("RequestAssignee")
+  completedRequests     FormulationRequest[] @relation("RequestCompleter")
 
   @@index([teamId])
   @@map("users")
@@ -553,4 +557,89 @@ model Country {
   kind       String  @default("country")
 
   @@map("countries")
+}
+
+// Clé donnée à une plateforme externe pour appeler /api/v1. Seul le hash est stocké.
+model ApiKey {
+  id            String    @id @default(uuid())
+  name          String
+  keyHash       String    @unique @map("key_hash")
+  prefix        String
+  webhookUrl    String?   @map("webhook_url") @db.Text
+  webhookSecret String    @map("webhook_secret")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  revokedAt     DateTime? @map("revoked_at")
+
+  requests FormulationRequest[]
+
+  teamId String @map("team_id")
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@map("api_keys")
+}
+
+// Demande de création de parfum reçue d'une plateforme externe.
+model FormulationRequest {
+  id             String  @id @default(uuid())
+  externalRef    String? @map("external_ref")
+  requesterName  String  @map("requester_name")
+  requesterEmail String  @map("requester_email")
+  perfumeName    String? @map("perfume_name")
+  description    String  @db.Text
+
+  forClient       Boolean @default(false) @map("for_client")
+  clientCompany   String? @map("client_company")
+  clientFirstName String? @map("client_first_name")
+  clientLastName  String? @map("client_last_name")
+  clientEmail     String? @map("client_email")
+  clientPhone     String? @map("client_phone")
+  projectName     String? @map("project_name")
+
+  // pending | in_progress | completed | cancelled
+  status String @default("pending")
+
+  assignedToId  String?   @map("assigned_to_id")
+  assignedTo    User?     @relation("RequestAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedAt    DateTime? @map("assigned_at")
+  completedById String?   @map("completed_by_id")
+  completedBy   User?     @relation("RequestCompleter", fields: [completedById], references: [id], onDelete: SetNull)
+  completedAt   DateTime? @map("completed_at")
+
+  clientId  String? @map("client_id")
+  projectId String? @map("project_id")
+  formulaId String? @unique @map("formula_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  deliveries WebhookDelivery[]
+
+  apiKeyId String? @map("api_key_id")
+  apiKey   ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  teamId   String  @map("team_id")
+  team     Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, status])
+  @@map("formulation_requests")
+}
+
+// Trace de chaque envoi de webhook, pour les relances et le diagnostic.
+model WebhookDelivery {
+  id            String    @id @default(uuid())
+  event         String
+  payload       Json
+  // pending | delivered | failed
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error") @db.Text
+  nextAttemptAt DateTime? @map("next_attempt_at")
+  deliveredAt   DateTime? @map("delivered_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  requestId String             @map("request_id")
+  request   FormulationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@map("webhook_deliveries")
 }
