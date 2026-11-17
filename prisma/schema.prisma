@@ -602,6 +602,8 @@ model FormulationRequest {
   assignedToId  String?   @map("assigned_to_id")
   assignedTo    User?     @relation("RequestAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
   assignedAt    DateTime? @map("assigned_at")
+  // Le parfumeur a commencé la formule (sinon elle reste « à réaliser »).
+  startedAt     DateTime? @map("started_at")
   completedById String?   @map("completed_by_id")
   completedBy   User?     @relation("RequestCompleter", fields: [completedById], references: [id], onDelete: SetNull)
   completedAt   DateTime? @map("completed_at")
