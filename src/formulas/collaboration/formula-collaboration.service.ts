@@ -1,8 +1,11 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { AuthUser } from '../../auth/auth-user.js';
 import { WebhooksService } from '../../api-keys/webhooks.service.js';
 import { toPublicRequest } from '../../formulation-requests/formulation-requests.service.js';
+import { MailService } from '../../mail/mail.service.js';
+import { RequesterMailService } from '../../formulation-requests/requester-mail.service.js';
+import { composeMentionMail } from './mention-mail.js';
 
 const PERSON = { select: { id: true, name: true, email: true } } as const;
 const AUTHOR = { author: { select: { id: true, name: true } } } as const;
@@ -10,9 +13,13 @@ const AUTHOR = { author: { select: { id: true, name: true } } } as const;
 /** Description partagée, notes par version et discussion d'équipe d'une formule. */
 @Injectable()
 export class FormulaCollaborationService {
+  private readonly logger = new Logger(FormulaCollaborationService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly webhooks: WebhooksService,
+    private readonly mail: MailService,
+    private readonly requesterMail: RequesterMailService,
   ) {}
 
   private async lineageOf(teamId: string, id: string) {
@@ -84,7 +91,10 @@ export class FormulaCollaborationService {
         where: { id: completedRequestId },
         include: { assignedTo: PERSON, completedBy: PERSON },
       });
-      if (request) this.webhooks.notify(request.apiKeyId, 'formulation_request.completed', toPublicRequest(request));
+      if (request) {
+        this.webhooks.notify(request.apiKeyId, 'formulation_request.completed', toPublicRequest(request));
+        this.requesterMail.notify('completed', request);
+      }
     }
     return { finalVersionId: id };
   }
@@ -181,12 +191,12 @@ export class FormulaCollaborationService {
     // On ne notifie que de vrais membres de l'équipe, jamais soi-même.
     const mentioned = await this.prisma.user.findMany({
       where: { teamId: user.teamId, id: { in: [...new Set(mentionUserIds)].filter((m) => m !== user.id) } },
-      select: { id: true },
+      select: { id: true, name: true, email: true },
     });
     const mentionIds = mentioned.map((m) => m.id);
     const text = body.trim();
 
-    return this.prisma.$transaction(async (tx) => {
+    const message = await this.prisma.$transaction(async (tx) => {
       const message = await tx.formulaMessage.create({
         data: {
           rootFormulaId: lineage.rootId,
@@ -211,5 +221,41 @@ export class FormulaCollaborationService {
       }
       return message;
     });
+
+    // Hors transaction et sans attendre : un échec d'envoi ne doit pas bloquer le message.
+    if (mentioned.length > 0) void this.mailMentions(user, lineage.id, text, mentioned);
+    return message;
+  }
+
+  /** Un mail par membre mentionné : formule concernée, auteur et message. */
+  private async mailMentions(
+    user: AuthUser,
+    formulaId: string,
+    body: string,
+    recipients: { id: string; name: string; email: string }[],
+  ) {
+    if (!this.mail.configured) return;
+    try {
+      const formula = await this.prisma.formula.findUniqueOrThrow({
+        where: { id: formulaId },
+        select: {
+          name: true,
+          code: true,
+          version: true,
+          description: true,
+          project: { select: { name: true, client: { select: { company: true, contactFirstName: true, contactLastName: true } } } },
+        },
+      });
+      const results = await Promise.allSettled(
+        recipients.map((recipient) =>
+          this.mail.send(composeMentionMail({ recipient, authorName: user.name, body, formula })),
+        ),
+      );
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') this.logger.error(`Mail de mention non envoyé à ${recipients[i].email}`, r.reason);
+      });
+    } catch (err) {
+      this.logger.error('Mails de mention non envoyés', err as Error);
+    }
   }
 }

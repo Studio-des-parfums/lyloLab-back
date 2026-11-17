@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import type { AuthUser } from '../auth/auth-user.js';
 import type { ApiClient } from '../api-keys/api-key.guard.js';
 import { WebhooksService } from '../api-keys/webhooks.service.js';
+import { RequesterMailService } from './requester-mail.service.js';
 import type { CreateFormulationRequestDto } from './dto/create-formulation-request.dto.js';
 
 export const REQUEST_STATUSES = ['pending', 'in_progress', 'completed', 'cancelled'] as const;
@@ -62,6 +63,7 @@ export class FormulationRequestsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly webhooks: WebhooksService,
+    private readonly requesterMail: RequesterMailService,
   ) {}
 
   async createFromApi(client: ApiClient, dto: CreateFormulationRequestDto) {
@@ -86,6 +88,7 @@ export class FormulationRequestsService {
       },
       include: { assignedTo: PERSON, completedBy: PERSON },
     });
+    this.requesterMail.notify('received', created);
     return toPublicRequest(created);
   }
 
@@ -116,7 +119,9 @@ export class FormulationRequestsService {
     if (count === 0) {
       throw new ConflictException('Seule une demande en attente peut être annulée.');
     }
-    return this.findOneForApi(client, id);
+    const cancelled = await this.findOwnedByKey(client, id);
+    this.requesterMail.notify('cancelled', cancelled);
+    return toPublicRequest(cancelled);
   }
 
   // ---------- Côté équipe Lylo-Lab (session utilisateur) ----------
@@ -240,6 +245,7 @@ export class FormulationRequestsService {
 
     const taken = await this.findOneForTeam(user.teamId, id);
     this.webhooks.notify(taken.apiKeyId, 'formulation_request.taken', toPublicRequest(taken));
+    this.requesterMail.notify('taken', taken);
     return taken;
   }
 
@@ -256,6 +262,7 @@ export class FormulationRequestsService {
     await this.prisma.formulationRequest.update({ where: { id }, data: { startedAt: new Date() } });
     const started = await this.findOneForTeam(user.teamId, id);
     this.webhooks.notify(started.apiKeyId, 'formulation_request.started', toPublicRequest(started));
+    this.requesterMail.notify('started', started);
     return started;
   }
 
