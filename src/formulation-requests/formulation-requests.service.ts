@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { AuthUser } from '../auth/auth-user.js';
 import type { ApiClient } from '../api-keys/api-key.guard.js';
+import { WebhooksService } from '../api-keys/webhooks.service.js';
 import type { CreateFormulationRequestDto } from './dto/create-formulation-request.dto.js';
 
 export const REQUEST_STATUSES = ['pending', 'in_progress', 'completed', 'cancelled'] as const;
@@ -58,7 +59,10 @@ export function toPublicRequest(r: {
 
 @Injectable()
 export class FormulationRequestsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly webhooks: WebhooksService,
+  ) {}
 
   async createFromApi(client: ApiClient, dto: CreateFormulationRequestDto) {
     const forClient = dto.forClient ?? false;
@@ -234,7 +238,9 @@ export class FormulationRequestsService {
       });
     });
 
-    return this.findOneForTeam(user.teamId, id);
+    const taken = await this.findOneForTeam(user.teamId, id);
+    this.webhooks.notify(taken.apiKeyId, 'formulation_request.taken', toPublicRequest(taken));
+    return taken;
   }
 
   /** « Commencer » : seule la personne qui a pris la demande peut la démarrer. */
@@ -246,10 +252,11 @@ export class FormulationRequestsService {
     if (request.status !== 'in_progress') {
       throw new ConflictException("Cette demande n'est pas en cours.");
     }
-    if (!request.startedAt) {
-      await this.prisma.formulationRequest.update({ where: { id }, data: { startedAt: new Date() } });
-    }
-    return this.findOneForTeam(user.teamId, id);
+    if (request.startedAt) return request;
+    await this.prisma.formulationRequest.update({ where: { id }, data: { startedAt: new Date() } });
+    const started = await this.findOneForTeam(user.teamId, id);
+    this.webhooks.notify(started.apiKeyId, 'formulation_request.started', toPublicRequest(started));
+    return started;
   }
 
   private async findOwnedByKey(client: ApiClient, id: string) {

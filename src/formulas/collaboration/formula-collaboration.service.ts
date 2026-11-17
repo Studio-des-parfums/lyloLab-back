@@ -1,13 +1,19 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { AuthUser } from '../../auth/auth-user.js';
+import { WebhooksService } from '../../api-keys/webhooks.service.js';
+import { toPublicRequest } from '../../formulation-requests/formulation-requests.service.js';
 
+const PERSON = { select: { id: true, name: true, email: true } } as const;
 const AUTHOR = { author: { select: { id: true, name: true } } } as const;
 
 /** Description partagée, notes par version et discussion d'équipe d'une formule. */
 @Injectable()
 export class FormulaCollaborationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly webhooks: WebhooksService,
+  ) {}
 
   private async lineageOf(teamId: string, id: string) {
     const formula = await this.prisma.formula.findFirst({
@@ -47,16 +53,39 @@ export class FormulaCollaborationService {
     return { startDate: start ?? null, endDate: end ?? null };
   }
 
-  /** Désigne la version finale de la formule : elle est finalisée (verrouillée) au passage. */
+  /**
+   * Désigne la version finale de la formule : elle est finalisée (verrouillée) au passage.
+   * Si la formule vient d'une demande externe encore en cours, la demande est terminée
+   * et la plateforme d'origine est prévenue par webhook.
+   */
   async markFinal(user: AuthUser, id: string) {
     const { rootId } = await this.lineageOf(user.teamId, id);
-    await this.prisma.$transaction([
-      this.prisma.formula.update({ where: { id }, data: { status: 'completed' } }),
-      this.prisma.formula.updateMany({
+    const completedRequestId = await this.prisma.$transaction(async (tx) => {
+      await tx.formula.update({ where: { id }, data: { status: 'completed' } });
+      await tx.formula.updateMany({
         where: { teamId: user.teamId, OR: [{ id: rootId }, { rootFormulaId: rootId }] },
         data: { finalVersionId: id },
-      }),
-    ]);
+      });
+      // Conditionnel sur le statut : une demande annulée ou déjà terminée n'est pas touchée.
+      const request = await tx.formulationRequest.findFirst({
+        where: { teamId: user.teamId, formulaId: rootId, status: 'in_progress' },
+        select: { id: true },
+      });
+      if (!request) return null;
+      const { count } = await tx.formulationRequest.updateMany({
+        where: { id: request.id, status: 'in_progress' },
+        data: { status: 'completed', completedById: user.id, completedAt: new Date() },
+      });
+      return count ? request.id : null;
+    });
+
+    if (completedRequestId) {
+      const request = await this.prisma.formulationRequest.findUnique({
+        where: { id: completedRequestId },
+        include: { assignedTo: PERSON, completedBy: PERSON },
+      });
+      if (request) this.webhooks.notify(request.apiKeyId, 'formulation_request.completed', toPublicRequest(request));
+    }
     return { finalVersionId: id };
   }
 

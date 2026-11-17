@@ -1,4 +1,6 @@
 import {
+  HttpException,
+  HttpStatus,
   Injectable,
   UnauthorizedException,
   createParamDecorator,
@@ -15,10 +17,36 @@ export interface ApiClient {
   name: string;
 }
 
+/** Limite par clé : fenêtre fixe en mémoire (suffisant tant qu'il n'y a qu'une instance). */
+export const RATE_LIMIT = { max: 60, windowMs: 60_000 };
+
+export class RateLimiter {
+  private readonly windows = new Map<string, { start: number; count: number }>();
+
+  constructor(private readonly now: () => number = Date.now) {}
+
+  /** Renvoie le nombre de secondes à attendre si la limite est atteinte, sinon null. */
+  hit(id: string): number | null {
+    const now = this.now();
+    const w = this.windows.get(id);
+    if (!w || now - w.start >= RATE_LIMIT.windowMs) {
+      this.windows.set(id, { start: now, count: 1 });
+      return null;
+    }
+    if (w.count >= RATE_LIMIT.max) return Math.ceil((w.start + RATE_LIMIT.windowMs - now) / 1000);
+    w.count++;
+    return null;
+  }
+}
+
 /** Protège /api/v1 : à combiner avec @Public() pour court-circuiter l'AuthGuard utilisateur. */
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly limiter: RateLimiter;
+
+  constructor(private readonly prisma: PrismaService, limiter?: RateLimiter) {
+    this.limiter = limiter ?? new RateLimiter();
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context
@@ -32,6 +60,16 @@ export class ApiKeyGuard implements CanActivate {
       select: { id: true, teamId: true, name: true, revokedAt: true },
     });
     if (!apiKey || apiKey.revokedAt) throw new UnauthorizedException('Clé API invalide ou révoquée.');
+
+    const retryAfter = this.limiter.hit(apiKey.id);
+    if (retryAfter !== null) {
+      context.switchToHttp().getResponse<{ setHeader?: (k: string, v: string) => void }>()
+        .setHeader?.('Retry-After', String(retryAfter));
+      throw new HttpException(
+        `Trop de requêtes : ${RATE_LIMIT.max} par minute maximum. Réessayez dans ${retryAfter} s.`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
 
     request.apiClient = { apiKeyId: apiKey.id, teamId: apiKey.teamId, name: apiKey.name };
     return true;
