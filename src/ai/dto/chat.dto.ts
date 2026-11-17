@@ -9,6 +9,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   MinLength,
   ValidateNested,
@@ -44,8 +45,19 @@ export class FormulaSnapshotLineDto {
 
 /** State of the formula currently open in the builder, as seen by the user. */
 export class FormulaSnapshotDto {
+  /** Saved formula: the server loads its project and notes from the database. */
+  @IsOptional()
+  @IsUUID()
+  formulaId?: string | null;
+
   @IsString()
   name!: string;
+
+  /** Target result, sent for formulas not saved yet. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  description?: string | null;
 
   @IsNumber()
   totalVolumeMl!: number;
