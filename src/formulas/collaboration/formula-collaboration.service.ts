@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import type { AuthUser } from '../../auth/auth-user.js';
 
@@ -27,6 +27,24 @@ export class FormulaCollaborationService {
       data: { description: value },
     });
     return { description: value };
+  }
+
+  /** Dates de début et de fin de la formule, communes à toutes ses versions. */
+  async updateSchedule(user: AuthUser, id: string, dates: { startDate?: string | null; endDate?: string | null }) {
+    const { rootId } = await this.lineageOf(user.teamId, id);
+    const toDate = (v: string | null | undefined) => (v === undefined ? undefined : v ? new Date(v) : null);
+    const data = { startDate: toDate(dates.startDate), endDate: toDate(dates.endDate) };
+    const current = await this.prisma.formula.findUnique({ where: { id: rootId }, select: { startDate: true, endDate: true } });
+    const start = data.startDate !== undefined ? data.startDate : current?.startDate;
+    const end = data.endDate !== undefined ? data.endDate : current?.endDate;
+    if (start && end && end < start) {
+      throw new BadRequestException('La date de fin doit être après la date de début.');
+    }
+    await this.prisma.formula.updateMany({
+      where: { teamId: user.teamId, OR: [{ id: rootId }, { rootFormulaId: rootId }] },
+      data,
+    });
+    return { startDate: start ?? null, endDate: end ?? null };
   }
 
   /** Désigne la version finale de la formule : elle est finalisée (verrouillée) au passage. */
@@ -65,6 +83,8 @@ export class FormulaCollaborationService {
         status: true,
         description: true,
         finalVersionId: true,
+        startDate: true,
+        endDate: true,
         totalVolumeMl: true,
         createdAt: true,
         createdByName: true,
@@ -78,6 +98,8 @@ export class FormulaCollaborationService {
       rootId,
       name: versions[versions.length - 1]?.name ?? root.name,
       description: root.description,
+      startDate: root.startDate,
+      endDate: root.endDate,
       finalVersionId: root.finalVersionId,
       project: root.project,
       versions,

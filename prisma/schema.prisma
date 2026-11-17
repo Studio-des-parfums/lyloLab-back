@@ -148,6 +148,9 @@ model Formula {
   version       Int       @default(1)
   // Identifiant lisible : XXX-XXX-n, et -n-m pour une branche repartie d'une version déjà suivie.
   code          String?
+  // Période de travail de la formule (commune à toutes les versions, comme le résultat visé).
+  startDate      DateTime? @map("start_date")
+  endDate        DateTime? @map("end_date")
   // Version retenue comme finale pour toute la lignée (copiée sur chaque version, comme la description).
   finalVersionId String?  @map("final_version_id")
   rootFormulaId String?   @map("root_formula_id")
@@ -190,8 +193,6 @@ model Project {
   name        String
   clientId    String    @map("client_id")
   description String?   @db.Text
-  startDate   DateTime? @map("start_date")
-  endDate     DateTime? @map("end_date")
   createdAt   DateTime  @default(now()) @map("created_at")
 
   client   Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)

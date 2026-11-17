@@ -119,6 +119,8 @@ export class FormulasService {
       let projectId = dto.projectId ?? null;
       let description = dto.description?.trim() || null;
       let finalVersionId: string | null = null;
+      let startDate: Date | null = null;
+      let endDate: Date | null = null;
       let code: string;
 
       if (!dto.versionOfId) {
@@ -148,10 +150,12 @@ export class FormulasService {
         // La description (résultat visé) est commune à toute la lignée.
         const root = await tx.formula.findFirst({
           where: { id: rootFormulaId },
-          select: { description: true, finalVersionId: true },
+          select: { description: true, finalVersionId: true, startDate: true, endDate: true },
         });
         description = root?.description ?? description;
         finalVersionId = root?.finalVersionId ?? null;
+        startDate = root?.startDate ?? null;
+        endDate = root?.endDate ?? null;
       }
 
       return tx.formula.create({
@@ -162,6 +166,8 @@ export class FormulasService {
           name: dto.name,
           description,
           finalVersionId,
+          startDate,
+          endDate,
           code,
           facets: dto.facets,
           adjustments: dto.adjustments,

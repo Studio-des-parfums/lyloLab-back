@@ -206,7 +206,8 @@ export class FormulationRequestsService {
             clientId,
             name: projectName,
             description: request.description,
-            startDate: now,
+          // La formule démarre le jour de la prise en charge.
+          startDate: now,
           },
           select: { id: true },
         });
